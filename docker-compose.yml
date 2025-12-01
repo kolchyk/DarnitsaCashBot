@@ -41,14 +41,22 @@ services:
       - "9000:9000"
       - "9001:9001"
 
-  ocr-mock:
+  ocr-worker:
     build:
       context: .
-      dockerfile: services/ocr_mock/Dockerfile
+      dockerfile: services/ocr_worker/Dockerfile
+    depends_on:
+      - postgres
+      - rabbitmq
+      - minio
     environment:
-      PORT: 8081
-    ports:
-      - "8081:8081"
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-dummy-token}
+      ENCRYPTION_SECRET: ${ENCRYPTION_SECRET:-dummy-secret}
+      POSTGRES_HOST: postgres
+      RABBITMQ_HOST: rabbitmq
+      STORAGE_ENDPOINT: http://minio:9000
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-miniokey}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-miniopass}
 
   easypay-mock:
     build:

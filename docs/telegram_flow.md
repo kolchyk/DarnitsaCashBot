@@ -1,116 +1,114 @@
-# Telegram Bot Flow & Setup Guide
+# Руководство по потоку и настройке Telegram-бота
 
-This guide captures how to configure the Telegram-facing experience and how it aligns with the backend flow that powers `DarnitsaCashBot`. It is derived from the MVP requirements in `prd.md`, the payout details in `easy.md`, and the OCR expectations in `OCR.md`, plus the current implementation under `apps/telegram_bot`, `apps/api_gateway`, and the services in `services/`.
+Это руководство описывает, как настроить взаимодействие с Telegram и как оно согласуется с backend-потоком, который обеспечивает работу `DarnitsaCashBot`. Оно основано на требованиях MVP из `prd.md`, деталях выплат из `easy.md` и ожиданиях по OCR из `OCR.md`, а также на текущей реализации под `apps/telegram_bot`, `apps/api_gateway` и сервисами в `services/`.
 
-## 1. Scope & Prerequisites
+## 1. Область применения и предварительные требования
 
-- **Primary goal**: automate “receipt in → payout out” for Ukrainian shoppers, rewarding each accepted Darnitsa receipt with a 1 UAH mobile top-up.
-- **Foundational docs**: keep `prd.md`, `OCR.md`, and `easy.md` open while operating the bot to validate assumptions (eligibility window, payout latency, fraud guardrails).
-- **Infrastructure**: PostgreSQL, RabbitMQ, Redis, S3-compatible storage, OCR workers, rules engine, and EasyPay/Portmone connectivity must be reachable before switching on the bot.
+- **Основная цель**: автоматизировать процесс "чек на вход → выплата на выход" для украинских покупателей, награждая каждый принятый чек Darnitsa пополнением мобильного счета на 1 UAH.
+- **Основополагающие документы**: держите открытыми `prd.md`, `OCR.md` и `easy.md` при работе с ботом для проверки предположений (окно приемлемости, задержка выплат, защита от мошенничества).
+- **Инфраструктура**: PostgreSQL, RabbitMQ, Redis, хранилище, совместимое с S3, OCR-воркеры, движок правил и подключение к EasyPay/Portmone должны быть доступны перед включением бота.
 
-## 2. Telegram Conversation Blueprint
+## 2. Схема разговора в Telegram
 
-### 2.1 Onboarding & Consent
+### 2.1 Онбординг и согласие
 
-1. `/start` (`apps/telegram_bot/handlers/commands.py::cmd_start`) greets the user and displays a `request_contact=True` button translated via `libs.common.i18n`.
-2. The handler immediately calls `ReceiptApiClient.register_user()` to insert/refresh the user record with locale + phone if Telegram already shared it.
-3. Without a phone number, payouts are blocked. The UX should keep prompting for contact data (see `handle_contact`) until `Receipt.phone_number` exists.
-4. Terms/privacy text referenced in `prd.md` should be added to the welcome message or sent as a follow-up template if legal requires explicit consent logging.
+1. `/start` (`apps/telegram_bot/handlers/commands.py::cmd_start`) приветствует пользователя и отображает кнопку `request_contact=True`, переведенную через `libs.common.i18n`.
+2. Обработчик немедленно вызывает `ReceiptApiClient.register_user()` для вставки/обновления записи пользователя с локалью и телефоном, если Telegram уже предоставил их.
+3. Без номера телефона выплаты блокируются. UX должен продолжать запрашивать контактные данные (см. `handle_contact`), пока не появится `Receipt.phone_number`.
+4. Текст условий/конфиденциальности, упомянутый в `prd.md`, должен быть добавлен в приветственное сообщение или отправлен как последующий шаблон, если юридический отдел требует явного логирования согласия.
 
-### 2.2 Commands & States
+### 2.2 Команды и состояния
 
-| Command | Handler | Purpose |
+| Команда | Обработчик | Назначение |
 | --- | --- | --- |
-| `/start` | `commands.cmd_start` | Kick off onboarding, surface contact keyboard, register the user. |
-| `/help` | `commands.cmd_help` | Explain the 1 UAH reward mechanic and highlight `/history` + `/change_phone`. |
-| `/history` | `commands.cmd_history` | Fetch the last receipts through `/bot/history/{telegram_id}` and surface EasyPay references. |
-| `/change_phone` | `commands.cmd_change_phone` | Re-open the contact keyboard. Trigger `handle_contact` when the user taps it. |
+| `/start` | `commands.cmd_start` | Запуск онбординга, отображение контактной клавиатуры, регистрация пользователя. |
+| `/help` | `commands.cmd_help` | Объяснение механики награды в 1 UAH и выделение `/history` + `/change_phone`. |
+| `/history` | `commands.cmd_history` | Получение последних чеков через `/bot/history/{telegram_id}` и отображение ссылок на EasyPay. |
+| `/change_phone` | `commands.cmd_change_phone` | Повторное открытие контактной клавиатуры. Запуск `handle_contact` при нажатии пользователем. |
 
-State storage (phone, locale, last statuses) lives in the backend DB; the bot remains stateless apart from the injected `ReceiptApiClient`.
+Хранение состояния (телефон, локаль, последние статусы) находится в backend БД; бот остается stateless, кроме внедренного `ReceiptApiClient`.
 
-### 2.3 Receipt Submission UX
+### 2.3 UX отправки чека
 
-1. `media.handle_receipt_photo` listens for `Message.photo`.
-2. Bot validates the image size both client-side (`photo.file_size <= 10 MB`) and server-side (`apps/api_gateway/routes/bot.py::upload_receipt` re-checks `MAX_FILE_SIZE` and MIME type).
-3. The bot answers with “Processing your receipt…” and streams the bytes to `/bot/receipts` (multipart upload, see `ReceiptApiClient.upload_receipt`).
-4. The API gateway stores the file in object storage, enqueues `QueueNames.RECEIPTS`, and returns the initial DB status which the bot echoes back.
-5. Non-photo payloads fall through to `fallback_handler`, keeping the chat clean and guiding users back to `/help`.
+1. `media.handle_receipt_photo` прослушивает `Message.photo`.
+2. Бот проверяет размер изображения как на стороне клиента (`photo.file_size <= 10 MB`), так и на стороне сервера (`apps/api_gateway/routes/bot.py::upload_receipt` повторно проверяет `MAX_FILE_SIZE` и MIME-тип).
+3. Бот отвечает "Обрабатываю ваш чек…" и передает байты в `/bot/receipts` (multipart upload, см. `ReceiptApiClient.upload_receipt`).
+4. API-шлюз сохраняет файл в объектном хранилище, ставит в очередь `QueueNames.RECEIPTS` и возвращает начальный статус БД, который бот повторяет обратно.
+5. Нефото-данные попадают в `fallback_handler`, поддерживая чистоту чата и направляя пользователей обратно к `/help`.
 
-### 2.4 Localization & Copy Maintenance
+### 2.4 Локализация и поддержка текстов
 
-- Aiogram uses gettext; translation calls wrap every string via `get_translator` and `.po` files under `apps/telegram_bot/locales/uk|ru/LC_MESSAGES`.
-- Update copy by editing the `.po` files and recompiling catalogs via `poetry run pybabel compile`.
-- Default locale derives from `Message.from_user.language_code[:2]`, so Ukrainian is default, Russian is fallback, English can be added later per `prd.md`.
+- Aiogram использует gettext; вызовы перевода оборачивают каждую строку через `get_translator` и файлы `.po` под `apps/telegram_bot/locales/uk|ru/LC_MESSAGES`.
+- Обновляйте тексты, редактируя файлы `.po` и перекомпилируя каталоги через `poetry run pybabel compile`.
+- Локаль по умолчанию берется из `Message.from_user.language_code[:2]`, поэтому украинский — по умолчанию, русский — резервный, английский можно добавить позже согласно `prd.md`.
 
-### 2.5 Guardrails & Limits
+### 2.5 Защитные механизмы и ограничения
 
-- `apps/api_gateway/dependencies.get_receipt_rate_limiter` caps uploads at **5 per minute per Telegram ID** using Redis keys (`rl:receipt:{telegram_id}`).
-- `services/rules_engine/service.py` enforces **max 3 accepted receipts per user per day** (`MAX_RECEIPTS_PER_DAY`) and rejects receipts older than **7 days** from the OCR purchase timestamp.
-- `prd.md` also calls out image resolution (≥600 px short edge) and manual review workflow; enrich `media.handle_receipt_photo` responses if you add client-side heuristics (e.g., warn about blurry images).
+- `apps/api_gateway/dependencies.get_receipt_rate_limiter` ограничивает загрузки до **5 в минуту на Telegram ID** с использованием ключей Redis (`rl:receipt:{telegram_id}`).
+- `services/rules_engine/service.py` применяет **максимум 3 принятых чека на пользователя в день** (`MAX_RECEIPTS_PER_DAY`) и отклоняет чеки старше **7 дней** от временной метки покупки OCR.
+- `prd.md` также указывает разрешение изображения (≥600 px короткая сторона) и рабочий процесс ручной проверки; расширьте ответы `media.handle_receipt_photo`, если добавляете клиентские эвристики (например, предупреждение о размытых изображениях).
 
-## 3. Backend Processing Flow
+## 3. Поток обработки в Backend
 
-| Step | Component & File | Description |
+| Шаг | Компонент и файл | Описание |
 | --- | --- | --- |
-| 1. Intake | `apps/api_gateway/routes/bot.py::upload_receipt` | Persists user + receipt, saves media to S3/MinIO via `StorageClient`, logs analytics, and publishes to `QueueNames.RECEIPTS`. |
-| 2. OCR | `services/ocr_worker/worker.py` | Consumes receipt messages, calls the OCR service (`http://ocr-mock:8081/ocr` by default), stores JSON output on the `Receipt`, and emits to `QueueNames.OCR_RESULTS`. |
-| 3. Eligibility | `services/rules_engine/service.py` | Loads catalog aliases (`CatalogRepository`), runs `is_receipt_eligible`, writes `LineItem`s, updates status to `accepted` or `rejected`, then publishes to `QueueNames.RULE_DECISIONS`. |
-| 4. Bonus orchestration | `services/bonus_service/main.py` | On `status=accepted`, decrypts the MSISDN, creates/upserts `BonusTransaction`, posts to EasyPay/Portmone (see `easy.md`), updates statuses, emits analytics, and pushes status events to `QueueNames.BONUS_EVENTS`. |
-| 5. Notifications | `apps/api_gateway/background.py::bonus_event_listener` | Listens on `bonus.events`, then delegates to `libs.common.notifications.NotificationService` to send final messages back to Telegram. |
+| 1. Прием | `apps/api_gateway/routes/bot.py::upload_receipt` | Сохраняет пользователя + чек, сохраняет медиа в S3/MinIO через `StorageClient`, логирует аналитику и публикует в `QueueNames.RECEIPTS`. |
+| 2. OCR | `services/ocr_worker/worker.py` | Потребляет сообщения о чеках, вызывает OCR-сервис (`http://ocr-mock:8081/ocr` по умолчанию), сохраняет JSON-вывод в `Receipt` и отправляет в `QueueNames.OCR_RESULTS`. |
+| 3. Приемлемость | `services/rules_engine/service.py` | Загружает алиасы каталога (`CatalogRepository`), запускает `is_receipt_eligible`, записывает `LineItem`s, обновляет статус на `accepted` или `rejected`, затем публикует в `QueueNames.RULE_DECISIONS`. |
+| 4. Оркестрация бонусов | `services/bonus_service/main.py` | При `status=accepted` расшифровывает MSISDN, создает/обновляет `BonusTransaction`, отправляет в EasyPay/Portmone (см. `easy.md`), обновляет статусы, отправляет аналитику и проталкивает события статуса в `QueueNames.BONUS_EVENTS`. |
+| 5. Уведомления | `apps/api_gateway/background.py::bonus_event_listener` | Прослушивает `bonus.events`, затем делегирует `libs.common.notifications.NotificationService` для отправки финальных сообщений обратно в Telegram. |
 
-Each hop preserves a correlation payload (`receipt_id`, `user_id`, `telegram_id`, `checksum`) so logs can be traced end-to-end.
+Каждый переход сохраняет корреляционную нагрузку (`receipt_id`, `user_id`, `telegram_id`, `checksum`), чтобы логи можно было отслеживать от начала до конца.
 
-## 4. OCR & Eligibility Expectations
+## 4. Ожидания по OCR и приемлемости
 
-- Follow the detailed preprocessing + Tesseract tuning in `OCR.md` (deskew, adaptive thresholding, `ukr+rus+eng`, confidence thresholds). The mock worker currently hits `ocr-mock`; swap it with the real OCR API by changing the URL and payload schema.
-- Store raw OCR JSON in `Receipt.ocr_payload` (already done in `ocr_worker`). Maintain the 0.8 confidence threshold and manual review queue described in `OCR.md`; extend `services/rules_engine` to publish `reason` codes when escalation is needed.
-- Deduplication currently uses SHA-256 of the uploaded bytes plus `ReceiptRepository` logic; ensure catalog aliases stay updated (`libs/data/models/catalog.py`) so `is_receipt_eligible` reflects the marketing SKU list.
+- Следуйте детальной предобработке + настройке Tesseract в `OCR.md` (выравнивание, адаптивная пороговая обработка, `ukr+rus+eng`, пороги уверенности). Мок-воркер в настоящее время обращается к `ocr-mock`; замените его на реальный OCR API, изменив URL и схему нагрузки.
+- Сохраняйте сырой OCR JSON в `Receipt.ocr_payload` (уже сделано в `ocr_worker`). Поддерживайте порог уверенности 0.8 и очередь ручной проверки, описанную в `OCR.md`; расширьте `services/rules_engine` для публикации кодов `reason`, когда требуется эскалация.
+- Дедупликация в настоящее время использует SHA-256 загруженных байтов плюс логику `ReceiptRepository`; убедитесь, что алиасы каталога остаются обновленными (`libs/data/models/catalog.py`), чтобы `is_receipt_eligible` отражал маркетинговый список SKU.
 
-## 5. Payout & Notification Flow
+## 5. Поток выплат и уведомлений
 
-1. `bonus_service` decrypts `User.phone_number` via `libs.common.crypto.Encryptor` and stores a 1 UAH amount (code default is `100`, adjust to represent kopecks if needed).
-2. The service calls EasyPay (or PortmoneDirect per `easy.md`). For production enablement, replace the manual HTTPX call with the official `easypay-api` client, set idempotency references, and honor the retry/backoff policy (3 attempts with exponential wait).
-3. Responses update `BonusTransaction.easypay_status` (`IN_PROGRESS` → `SUCCESS` / `FAILED`) and optionally `bonus.easypay_reference`.
-4. Analytics events (`payout_success`, `payout_failure`) stream via Redis (`libs/common/analytics.py`), powering the metrics in `prd.md`.
-5. `bonus_event_listener` sends user-facing confirmations (“1 UAH top-up completed” vs. “Payment failed, try again”). Customize copy through `NotificationService`.
+1. `bonus_service` расшифровывает `User.phone_number` через `libs.common.crypto.Encryptor` и сохраняет сумму 1 UAH (код по умолчанию — `100`, при необходимости скорректируйте для представления копеек).
+2. Сервис вызывает EasyPay (или PortmoneDirect согласно `easy.md`). Для продакшена замените ручной вызов HTTPX на официальный клиент `easypay-api`, установите ссылки идемпотентности и соблюдайте политику повторов/отката (3 попытки с экспоненциальным ожиданием).
+3. Ответы обновляют `BonusTransaction.easypay_status` (`IN_PROGRESS` → `SUCCESS` / `FAILED`) и опционально `bonus.easypay_reference`.
+4. События аналитики (`payout_success`, `payout_failure`) передаются через Redis (`libs/common/analytics.py`), обеспечивая метрики из `prd.md`.
+5. `bonus_event_listener` отправляет пользовательские подтверждения ("Пополнение на 1 UAH завершено" против "Платеж не удался, попробуйте снова"). Настройте тексты через `NotificationService`.
 
-If Portmone is preferred, follow Section 4 of `easy.md`: call `bills.create`, store returned bill IDs, and wait for the callback endpoint to flip statuses before alerting the user.
+Если предпочтителен Portmone, следуйте разделу 4 `easy.md`: вызовите `bills.create`, сохраните возвращенные ID счетов и дождитесь, пока callback-эндпоинт изменит статусы перед уведомлением пользователя.
 
-## 6. Configuration & Deployment Checklist
+## 6. Чеклист конфигурации и развертывания
 
 1. **Telegram**
-   - Set `TELEGRAM_BOT_TOKEN`, optional `TELEGRAM_WEBHOOK_URL` (webhook mode) or run polling via `apps/telegram_bot/main.py`.
-   - Configure admin IDs via `TELEGRAM_ADMIN_IDS` to whitelist support staff.
-2. **Persistence**
-   - Populate `POSTGRES_*` secrets and run migrations (see `libs/data/models/*`).
-   - Provide S3-compatible creds: `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`.
-3. **Messaging & Caching**
-   - Ensure RabbitMQ (`RABBITMQ_*`) and Redis (`REDIS_HOST`, `REDIS_PORT`) are reachable before starting workers.
-4. **Security**
-   - Generate `ENCRYPTION_SECRET` (32 bytes) for phone encryption.
-   - Set JWT secrets if admin APIs are in use.
-5. **External services**
-   - `EASYPAY_API_BASE`, `EASYPAY_MERCHANT_ID`, `EASYPAY_MERCHANT_SECRET` or Portmone equivalents from `easy.md`.
-   - OCR endpoint URL + credentials (update `ocr_worker` to use production host).
-6. **Runtime order**
-   - Launch dependencies (DB, storage, RabbitMQ, Redis) → start `apps/api_gateway` (FastAPI) → run background listener and schedulers → start `services/ocr_worker`, `services/rules_engine`, `services/bonus_service` → finally start `apps/telegram_bot`.
-7. **Receipt API base URL**
-   - Override `ReceiptApiClient(base_url=...)` in `apps/telegram_bot/main.py` if the API gateway is not on `http://localhost:8000`.
+   - Установите `TELEGRAM_BOT_TOKEN`, опционально `TELEGRAM_WEBHOOK_URL` (режим webhook) или запустите polling через `apps/telegram_bot/main.py`.
+   - Настройте ID администраторов через `TELEGRAM_ADMIN_IDS` для включения сотрудников поддержки в белый список.
+2. **Персистентность**
+   - Заполните секреты `POSTGRES_*` и запустите миграции (см. `libs/data/models/*`).
+   - Предоставьте учетные данные, совместимые с S3: `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`.
+3. **Обмен сообщениями и кэширование**
+   - Убедитесь, что RabbitMQ (`RABBITMQ_*`) и Redis (`REDIS_HOST`, `REDIS_PORT`) доступны перед запуском воркеров.
+4. **Безопасность**
+   - Сгенерируйте `ENCRYPTION_SECRET` (32 байта) для шифрования телефона.
+   - Установите секреты JWT, если используются admin API.
+5. **Внешние сервисы**
+   - `EASYPAY_API_BASE`, `EASYPAY_MERCHANT_ID`, `EASYPAY_MERCHANT_SECRET` или эквиваленты Portmone из `easy.md`.
+   - URL эндпоинта OCR + учетные данные (обновите `ocr_worker` для использования продакшен-хоста).
+6. **Порядок запуска**
+   - Запустите зависимости (БД, хранилище, RabbitMQ, Redis) → запустите `apps/api_gateway` (FastAPI) → запустите фоновый слушатель и планировщики → запустите `services/ocr_worker`, `services/rules_engine`, `services/bonus_service` → наконец запустите `apps/telegram_bot`.
+7. **Базовый URL API чеков**
+   - Переопределите `ReceiptApiClient(base_url=...)` в `apps/telegram_bot/main.py`, если API-шлюз не находится на `http://localhost:8000`.
 
-## 7. Monitoring, Alerts & Recovery
+## 7. Мониторинг, оповещения и восстановление
 
-- **Metrics**: Track `receipt_uploaded`, `receipt_accepted`, `receipt_rejected`, `payout_success`, `payout_failure`, EasyPay error rate, OCR latency/confidence, and queue backlogs as laid out in `prd.md` and `OCR.md`.
-- **Logs**: Enable structured logging via `configure_logging(settings.log_level)` everywhere; include `receipt_id`, `telegram_id`, and EasyPay references in each log entry to accelerate incident response.
-- **Alerting suggestions**:
-  - OCR failure rate >5% over 5 minutes.
-  - EasyPay/Portmone `status=fail` streak >3 or webhook silence >30 seconds.
-  - `bonus.events` queue depth >50 (notifications stuck).
-- **Common recovery steps**:
-  - **Receipt stuck in `processing`**: requeue the message onto `receipts.incoming` or re-run OCR via a manual endpoint once logs confirm storage availability.
-  - **Rules false negatives**: update catalog aliases (`libs/data/models/catalog.py`) and re-run `services/rules_engine` for affected receipts.
-  - **Payout failures**: inspect `BonusTransaction.easypay_status`, replay the payout with a fresh idempotency key, and notify support if EasyPay downtime exceeds SLA.
-  - **Reminder job**: `apps/api_gateway/background.py::reminder_job` is a placeholder; extend it to ping users who ran `/start` but sent no receipt within 24h as required by `prd.md`.
+- **Метрики**: Отслеживайте `receipt_uploaded`, `receipt_accepted`, `receipt_rejected`, `payout_success`, `payout_failure`, частоту ошибок EasyPay, задержку/уверенность OCR и задержки очередей, как указано в `prd.md` и `OCR.md`.
+- **Логи**: Включите структурированное логирование через `configure_logging(settings.log_level)` везде; включайте `receipt_id`, `telegram_id` и ссылки на EasyPay в каждую запись лога для ускорения реагирования на инциденты.
+- **Предложения по оповещению**:
+  - Частота сбоев OCR >5% за 5 минут.
+  - Серия `status=fail` EasyPay/Portmone >3 или тишина webhook >30 секунд.
+  - Глубина очереди `bonus.events` >50 (уведомления застряли).
+- **Общие шаги восстановления**:
+  - **Чек застрял в `processing`**: поставьте сообщение обратно в очередь `receipts.incoming` или повторно запустите OCR через ручной эндпоинт, как только логи подтвердят доступность хранилища.
+  - **Ложные отрицания правил**: обновите алиасы каталога (`libs/data/models/catalog.py`) и повторно запустите `services/rules_engine` для затронутых чеков.
+  - **Сбои выплат**: проверьте `BonusTransaction.easypay_status`, повторите выплату с новым ключом идемпотентности и уведомите поддержку, если простой EasyPay превышает SLA.
+  - **Задача напоминания**: `apps/api_gateway/background.py::reminder_job` — заглушка; расширьте ее для пинга пользователей, которые запустили `/start`, но не отправили чек в течение 24 часов, как требуется в `prd.md`.
 
-Keep this document updated whenever handlers, services, or external integrations change so ops, marketing, and support teams have a single source of truth for the bot experience.
-
-
+Держите этот документ обновленным всякий раз, когда изменяются обработчики, сервисы или внешние интеграции, чтобы команды операций, маркетинга и поддержки имели единый источник правды для опыта работы с ботом.

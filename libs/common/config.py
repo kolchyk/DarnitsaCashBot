@@ -41,6 +41,19 @@ class AppSettings(BaseSettings):
     easypay_merchant_id: str = Field(default="merchant", alias="EASYPAY_MERCHANT_ID")
     easypay_merchant_secret: str = Field(default="secret", alias="EASYPAY_MERCHANT_SECRET")
 
+    portmone_api_base: str = Field(
+        default="https://direct.portmone.com.ua/api/directcash/",
+        alias="PORTMONE_API_BASE",
+    )
+    portmone_login: str = Field(default="demo_login", alias="PORTMONE_LOGIN")
+    portmone_password: str = Field(default="demo_password", alias="PORTMONE_PASSWORD")
+    portmone_version: str = Field(default="2", alias="PORTMONE_VERSION")
+    portmone_lang: str | None = Field(default=None, alias="PORTMONE_LANG")
+    portmone_cert_path: Path | None = Field(default=None, alias="PORTMONE_CERT_PATH")
+    portmone_payee_id: str = Field(default="100000", alias="PORTMONE_PAYEE_ID")
+    portmone_default_currency: str = Field(default="UAH", alias="PORTMONE_DEFAULT_CURRENCY")
+    portmone_webhook_token: str | None = Field(default=None, alias="PORTMONE_WEBHOOK_TOKEN")
+
     encryption_secret: str = Field(..., alias="ENCRYPTION_SECRET")
     jwt_secret: str = Field(default="jwt-secret", alias="JWT_SECRET")
     jwt_alg: str = Field(default="HS256", alias="JWT_ALG")
