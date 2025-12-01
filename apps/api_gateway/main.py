@@ -5,7 +5,7 @@ import time
 import uuid
 
 from fastapi import FastAPI, Request, Response
-from prometheus_client import Counter, Histogram, generate_latest
+from prometheus_client import Counter, Histogram, generate_latest, REGISTRY
 from starlette.responses import PlainTextResponse
 
 try:
@@ -22,9 +22,66 @@ from libs.common.notifications import NotificationService
 from .background import bonus_event_listener, reminder_job
 from .routes import build_router
 
-REQUEST_COUNT = Counter("api_requests_total", "Total API requests", ["method", "path", "status"])
-REQUEST_LATENCY = Histogram(
-    "api_request_latency_seconds", "API request latency", ["method", "path"], buckets=(0.1, 0.3, 1, 3, 5)
+
+def _get_or_create_counter(name: str, documentation: str, labelnames: list[str]) -> Counter:
+    """Get existing counter or create a new one, handling module reloads."""
+    try:
+        # Try to create the counter - will raise ValueError if it already exists
+        return Counter(name, documentation, labelnames)
+    except ValueError:
+        # Metric already exists, find all related collectors and unregister them
+        # Prometheus creates multiple timeseries: name, name_created, and possibly name without suffix
+        collectors_to_unregister = []
+        for metric_name, collector in list(REGISTRY._names_to_collectors.items()):
+            # Match the base name or related variants
+            if metric_name == name or metric_name.startswith(f"{name}_") or metric_name == name.replace("_total", ""):
+                collectors_to_unregister.append(collector)
+        
+        # Unregister all related collectors
+        for collector in set(collectors_to_unregister):
+            try:
+                REGISTRY.unregister(collector)
+            except KeyError:
+                pass
+        
+        # Now create the counter again
+        return Counter(name, documentation, labelnames)
+
+
+def _get_or_create_histogram(
+    name: str, documentation: str, labelnames: list[str], buckets: tuple
+) -> Histogram:
+    """Get existing histogram or create a new one, handling module reloads."""
+    try:
+        # Try to create the histogram - will raise ValueError if it already exists
+        return Histogram(name, documentation, labelnames, buckets=buckets)
+    except ValueError:
+        # Metric already exists, find all related collectors and unregister them
+        # Prometheus creates multiple timeseries: name, name_bucket, name_sum, name_count
+        collectors_to_unregister = []
+        for metric_name, collector in list(REGISTRY._names_to_collectors.items()):
+            if metric_name == name or metric_name.startswith(f"{name}_"):
+                collectors_to_unregister.append(collector)
+        
+        # Unregister all related collectors
+        for collector in set(collectors_to_unregister):
+            try:
+                REGISTRY.unregister(collector)
+            except KeyError:
+                pass
+        
+        # Now create the histogram again
+        return Histogram(name, documentation, labelnames, buckets=buckets)
+
+
+REQUEST_COUNT = _get_or_create_counter(
+    "api_requests_total", "Total API requests", ["method", "path", "status"]
+)
+REQUEST_LATENCY = _get_or_create_histogram(
+    "api_request_latency_seconds",
+    "API request latency",
+    ["method", "path"],
+    buckets=(0.1, 0.3, 1, 3, 5),
 )
 
 

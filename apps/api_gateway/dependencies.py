@@ -17,8 +17,10 @@ async def get_settings_dep() -> AppSettings:
     return get_settings()
 
 
-async def get_session_dep(session: AsyncIterator[AsyncSession] = Depends(get_async_session)) -> AsyncSession:
-    return session  # FastAPI resolves generator dependencies automatically
+async def get_session_dep() -> AsyncIterator[AsyncSession]:
+    """Dependency that provides database session."""
+    async for session in get_async_session():
+        yield session
 
 
 def get_storage_client(settings: AppSettings = Depends(get_settings_dep)) -> StorageClient:
