@@ -51,12 +51,10 @@ async def test_trigger_payout_happy_path(monkeypatch):
     )
 
     payload = {"status": "accepted", "receipt_id": str(context.receipt_id)}
-    broker = SimpleNamespace()
     analytics = SimpleNamespace()
 
     await bonus_module.trigger_payout(
         payload=payload,
-        broker=broker,
         analytics=analytics,
         client=client,
         encryptor=Encryptor(),
@@ -108,7 +106,6 @@ async def test_trigger_payout_handles_response_error(monkeypatch):
 
     await bonus_module.trigger_payout(
         payload=payload,
-        broker=SimpleNamespace(),
         analytics=SimpleNamespace(),
         client=client,
         encryptor=Encryptor(),

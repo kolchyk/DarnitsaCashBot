@@ -130,6 +130,23 @@ def create_app() -> FastAPI:
         response.headers["X-Correlation-Id"] = correlation_id
         return response
 
+    @app.get("/", tags=["system"])
+    async def root():
+        return {
+            "name": "DarnitsaCashBot API",
+            "version": "0.1.0",
+            "status": "running",
+            "endpoints": {
+                "health": "/healthz",
+                "metrics": "/metrics",
+                "bot": "/bot",
+                "admin": "/admin",
+                "portmone": "/portmone",
+                "docs": "/docs",
+                "openapi": "/openapi.json"
+            }
+        }
+
     @app.get("/healthz", tags=["system"])
     async def health():
         return {"status": "ok"}
