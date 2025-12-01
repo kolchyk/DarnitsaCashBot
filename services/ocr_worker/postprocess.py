@@ -14,6 +14,7 @@ from unidecode import unidecode
 import logging
 
 from libs.common import AppSettings
+from libs.common.constants import DARNITSA_KEYWORDS_CYRILLIC, DARNITSA_KEYWORDS_LATIN
 
 from .tesseract_runner import OcrToken
 
@@ -161,14 +162,53 @@ def _join_tokens(tokens: Iterable[OcrToken]) -> str:
 
 
 def _extract_merchant(tokens: Sequence[OcrToken], header_height: int) -> str | None:
+    """Extract merchant name from OCR tokens, prioritizing Darnitsa detection."""
+    # First, try to find Darnitsa in header tokens
     header_tokens = [token for token in tokens if token.top <= header_height + 5]
     if not header_tokens:
         header_tokens = tokens
+    
     clusters = cluster_tokens_by_line(header_tokens, y_threshold=12)
     if not clusters:
-        return None
+        # Fallback: search all tokens if header clustering failed
+        clusters = cluster_tokens_by_line(tokens, y_threshold=12)
+        if not clusters:
+            return None
+    
+    # Search for Darnitsa keywords in header clusters first
+    for cluster in clusters:
+        text_lower = cluster.text.lower()
+        normalized_text = _normalize_text(cluster.text).lower()
+        
+        # Check for Darnitsa in original text (Cyrillic)
+        if any(keyword in text_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC):
+            LOGGER.debug("Found Darnitsa merchant (cyrillic) in header: '%s'", cluster.text[:50])
+            return cluster.text.strip()
+        
+        # Check for Darnitsa in normalized text (transliteration)
+        if any(keyword in normalized_text for keyword in DARNITSA_KEYWORDS_LATIN):
+            LOGGER.debug("Found Darnitsa merchant (latin) in header: '%s'", cluster.text[:50])
+            return cluster.text.strip()
+    
+    # If Darnitsa not found in header, search all tokens
+    all_clusters = cluster_tokens_by_line(tokens, y_threshold=12)
+    for cluster in all_clusters:
+        text_lower = cluster.text.lower()
+        normalized_text = _normalize_text(cluster.text).lower()
+        
+        # Check for Darnitsa in original text (Cyrillic)
+        if any(keyword in text_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC):
+            LOGGER.debug("Found Darnitsa merchant (cyrillic) in full text: '%s'", cluster.text[:50])
+            return cluster.text.strip()
+        
+        # Check for Darnitsa in normalized text (transliteration)
+        if any(keyword in normalized_text for keyword in DARNITSA_KEYWORDS_LATIN):
+            LOGGER.debug("Found Darnitsa merchant (latin) in full text: '%s'", cluster.text[:50])
+            return cluster.text.strip()
+    
+    # Fallback: return first header cluster (backward compatibility)
     candidate = clusters[0].text
-    # Return original text, not normalized (to preserve Ukrainian/Cyrillic text)
+    LOGGER.debug("No Darnitsa found, using first header cluster: '%s'", candidate[:50])
     return candidate.strip()
 
 
