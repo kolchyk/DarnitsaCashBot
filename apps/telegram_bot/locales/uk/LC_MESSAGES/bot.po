@@ -1,0 +1,47 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: darnitsacashbot 0.1.0\n"
+"POT-Creation-Date: 2025-12-01\n"
+"Language: uk\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "Share phone number"
+msgstr "Поділитися номером телефону"
+
+msgid "Welcome to DarnitsaCashBot! Please share your phone number."
+msgstr "Вітаємо у DarnitsaCashBot! Будь ласка, поділіться своїм номером телефону."
+
+msgid ""
+"Send a photo of a Darnitsa receipt to receive a 1₴ top-up. Use /history to "
+"see your past submissions or /change_phone to update your number."
+msgstr ""
+"Надішліть фото чеку з продуктами Дарниця, щоб отримати бонус 1₴. "
+"Скористайтеся /history, щоб переглянути історію, або /change_phone для "
+"оновлення номера."
+
+msgid "No receipts submitted yet."
+msgstr "Ще не надсилали жодного чеку."
+
+msgid "Last {count} receipts:"
+msgstr "Останні {count} чеки:"
+
+msgid "Tap the button below to update your phone."
+msgstr "Натисніть кнопку нижче, щоб оновити номер."
+
+msgid "Phone number saved. Send your receipt when ready."
+msgstr "Номер збережено. Надішліть чек, коли будете готові."
+
+msgid "Receipt image exceeds 10MB. Please send a smaller file."
+msgstr "Зображення чека перевищує 10 МБ. Надішліть менший файл."
+
+msgid "Processing your receipt..."
+msgstr "Обробляємо ваш чек..."
+
+msgid "Receipt received. Current status: {status}"
+msgstr "Чек отримано. Поточний статус: {status}"
+
+msgid "Please send a receipt photo or use /help for guidance."
+msgstr "Надішліть фото чека або скористайтеся /help для інструкцій."
+
