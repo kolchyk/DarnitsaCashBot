@@ -31,7 +31,9 @@ async def handle_receipt_photo(message: Message, receipt_client: ReceiptApiClien
         content_type="image/jpeg",
     )
     await message.answer(
-        _("Receipt received. Current status: {status}").format(status=response["status"])
+        _(
+            "Receipt received. PortmoneDirect payout will start after acceptance. Current status: {status}"
+        ).format(status=response["status"])
     )
 
 

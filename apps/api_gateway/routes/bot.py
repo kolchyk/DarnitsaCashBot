@@ -20,7 +20,13 @@ from ..dependencies import (
     get_session_dep,
     get_storage_client,
 )
-from ..schemas import ReceiptHistoryItem, ReceiptResponse, ReceiptUploadResponse, UserUpsertRequest
+from ..schemas import (
+    ReceiptHistoryItem,
+    ReceiptResponse,
+    ReceiptUploadResponse,
+    UserResponse,
+    UserUpsertRequest,
+)
 
 router = APIRouter()
 
@@ -28,7 +34,7 @@ MAX_FILE_SIZE = 10 * 1024 * 1024
 SUPPORTED_CONTENT_TYPES = {"image/jpeg", "image/png"}
 
 
-@router.post("/users")
+@router.post("/users", response_model=UserResponse)
 async def upsert_user(
     payload: UserUpsertRequest,
     session: AsyncSession = Depends(get_session_dep),
@@ -40,7 +46,12 @@ async def upsert_user(
         locale=payload.locale,
     )
     await session.commit()
-    return {"id": str(user.id), "telegram_id": user.telegram_id, "locale": user.locale}
+    return UserResponse(
+        id=user.id,
+        telegram_id=user.telegram_id,
+        locale=user.locale,
+        has_phone=bool(user.phone_number),
+    )
 
 
 @router.post("/receipts", response_model=ReceiptUploadResponse)
@@ -106,13 +117,17 @@ async def get_history(
         raise HTTPException(status_code=404, detail="User not found")
     receipt_repo = ReceiptRepository(session)
     receipts = await receipt_repo.history_for_user(user.id)
-    return [
-        ReceiptHistoryItem(
-            receipt_id=receipt.id,
-            status=receipt.status,
-            uploaded_at=receipt.upload_ts,
-            easypay_reference=receipt.bonus_transaction.easypay_reference if receipt.bonus_transaction else None,
+    history: list[ReceiptHistoryItem] = []
+    for receipt in receipts:
+        bonus = receipt.bonus_transaction
+        history.append(
+            ReceiptHistoryItem(
+                receipt_id=receipt.id,
+                status=receipt.status,
+                uploaded_at=receipt.upload_ts,
+                payout_reference=bonus.portmone_bill_id if bonus else None,
+                payout_status=bonus.payout_status if bonus else None,
+            )
         )
-        for receipt in receipts
-    ]
+    return history
 

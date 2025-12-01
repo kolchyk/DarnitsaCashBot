@@ -6,6 +6,7 @@ import json
 from libs.common import get_settings
 from libs.common.messaging import MessageBroker, QueueNames
 from libs.common.notifications import NotificationService
+from libs.data.models import ReceiptStatus
 
 
 async def bonus_event_listener(notification_service: NotificationService):
@@ -19,9 +20,10 @@ async def bonus_event_listener(notification_service: NotificationService):
                         payload = json.loads(message.body.decode("utf-8"))
                         telegram_id = payload.get("telegram_id")
                         if telegram_id:
+                            text = _format_payout_message(payload)
                             await notification_service.send_message(
                                 chat_id=int(telegram_id),
-                                text=f"Payout status: {payload.get('status')}",
+                                text=text,
                             )
         await asyncio.sleep(1)
 
@@ -30,4 +32,19 @@ async def reminder_job(notification_service: NotificationService):
     while True:
         await asyncio.sleep(60 * 60)  # placeholder hourly reminder scan
         # Pull pending reminders from DB/storage in future enhancement.
+
+
+def _format_payout_message(payload: dict) -> str:
+    status = payload.get("status")
+    bill_id = payload.get("bill_id") or "-"
+    error_description = payload.get("error_description")
+    error_code = payload.get("error_code")
+
+    if status == ReceiptStatus.PAYOUT_PENDING:
+        return f"PortmoneDirect: processing top-up (bill {bill_id})."
+    if status == ReceiptStatus.PAYOUT_SUCCESS:
+        return f"PortmoneDirect: top-up completed ✅ (bill {bill_id})."
+
+    reason = error_description or error_code or "unknown error"
+    return f"PortmoneDirect: top-up failed ({reason})."
 

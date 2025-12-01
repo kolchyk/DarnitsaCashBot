@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
+from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 
 from libs.common.i18n import get_translator
 
@@ -13,19 +13,18 @@ router = Router(name="commands")
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, receipt_client: ReceiptApiClient):
-    _ = get_translator(get_locale(message))
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=_("Share phone number"), request_contact=True)],
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True,
-    )
-    await message.answer(_("Welcome to DarnitsaCashBot! Please share your phone number."), reply_markup=kb)
-    await receipt_client.register_user(
+    locale = get_locale(message)
+    _ = get_translator(locale)
+    user_info = await receipt_client.register_user(
         telegram_id=message.from_user.id,
         phone_number=message.contact.phone_number if message.contact else None,
-        locale=get_locale(message),
+        locale=locale,
+    )
+    has_phone = bool(user_info.get("has_phone"))
+    reply_markup = contact_keyboard(_) if not has_phone else ReplyKeyboardRemove()
+    await message.answer(
+        onboarding_text(_, require_phone=not has_phone),
+        reply_markup=reply_markup,
     )
 
 
@@ -51,32 +50,77 @@ async def cmd_history(message: Message, receipt_client: ReceiptApiClient):
         _("Last {count} receipts:").format(count=len(history)),
     ]
     for item in history:
-        lines.append(f"- {item['status']} @ {item['uploaded_at']} (EasyPay: {item.get('easypay_reference','-')})")
+        reference = item.get("payout_reference") or "-"
+        payout_status = item.get("payout_status") or "-"
+        lines.append(
+            _(
+                "- {status} @ {uploaded_at} (Portmone bill: {reference}, payout: {payout_status})"
+            ).format(
+                status=item["status"],
+                uploaded_at=item["uploaded_at"],
+                reference=reference,
+                payout_status=payout_status,
+            )
+        )
     await message.answer("\n".join(lines))
 
 
 @router.message(Command("change_phone"))
 async def cmd_change_phone(message: Message):
     _ = get_translator(get_locale(message))
-    kb = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=_("Share phone number"), request_contact=True)]],
-        resize_keyboard=True,
-        one_time_keyboard=True,
-    )
-    await message.answer(_("Tap the button below to update your phone."), reply_markup=kb)
+    await message.answer(phone_prompt_text(_), reply_markup=contact_keyboard(_))
 
 
 @router.message(F.contact)
 async def handle_contact(message: Message, receipt_client: ReceiptApiClient):
-    _ = get_translator(get_locale(message))
-    await receipt_client.register_user(
+    locale = get_locale(message)
+    _ = get_translator(locale)
+    user_info = await receipt_client.register_user(
         telegram_id=message.from_user.id,
         phone_number=message.contact.phone_number,
-        locale=get_locale(message),
+        locale=locale,
     )
-    await message.answer(_("Phone number saved. Send your receipt when ready."))
+    if user_info.get("has_phone"):
+        await message.answer(contact_saved_text(_), reply_markup=ReplyKeyboardRemove())
+        return
+    await message.answer(phone_prompt_text(_), reply_markup=contact_keyboard(_))
 
 
 def get_locale(message: Message) -> str:
     return (message.from_user.language_code or "uk")[:2]
+
+
+def onboarding_text(_, *, require_phone: bool) -> str:
+    consent = consent_notice(_)
+    if require_phone:
+        return _(
+            "Welcome to DarnitsaCashBot! Share your phone number so we can send 1₴ EasyPay top-ups for each approved receipt. {consent}"
+        ).format(consent=consent)
+    return _(
+        "Welcome back! We already have your phone number—just send a Darnitsa receipt photo to receive your next 1₴ top-up. {consent}"
+    ).format(consent=consent)
+
+
+def contact_keyboard(_) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=_("Share phone number"), request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+def phone_prompt_text(_) -> str:
+    return _(
+        "We need your verified phone number to trigger EasyPay payouts. Tap the button below to share it."
+    )
+
+
+def contact_saved_text(_) -> str:
+    return _(
+        "Phone number saved. You can now send a receipt photo to get your 1₴ top-up. {consent}"
+    ).format(consent=consent_notice(_))
+
+
+def consent_notice(_) -> str:
+    return _("By sharing your contact you agree to the promo terms and privacy policy of Darnitsa.")
 
