@@ -62,21 +62,25 @@ class TesseractRunner:
                 pytesseract.pytesseract.tesseract_cmd = detected_path
                 LOGGER.info("Auto-detected tesseract at %s", detected_path)
         
-        # Set TESSDATA_PREFIX - use configured value or default Heroku/Ubuntu location
-        # Tesseract 5.x uses versioned directory: /usr/share/tesseract-ocr/5/tessdata/
-        # Fallback to non-versioned path for older installations
+        # Set TESSDATA_PREFIX - use configured value or auto-detect
+        # Priority: 1) configured TESSDATA_DIR, 2) app tessdata_final (Heroku), 3) system paths
         tessdata_path = settings.tessdata_dir
         if not tessdata_path:
-            # Try versioned path first (Tesseract 5.x), then fallback to non-versioned
-            versioned_path = "/usr/share/tesseract-ocr/5/tessdata"
-            non_versioned_path = "/usr/share/tesseract-ocr/tessdata"
-            if Path(versioned_path).exists():
-                tessdata_path = versioned_path
-            elif Path(non_versioned_path).exists():
-                tessdata_path = non_versioned_path
+            # Check for app-local tessdata directory (created by post_compile script)
+            app_tessdata = Path("tessdata_final")
+            if app_tessdata.exists() and any(app_tessdata.glob("*.traineddata")):
+                tessdata_path = str(app_tessdata.absolute())
             else:
-                # Default to versioned path (Tesseract 5.x standard)
-                tessdata_path = versioned_path
+                # Try system paths: versioned (Tesseract 5.x) then non-versioned
+                versioned_path = "/usr/share/tesseract-ocr/5/tessdata"
+                non_versioned_path = "/usr/share/tesseract-ocr/tessdata"
+                if Path(versioned_path).exists():
+                    tessdata_path = versioned_path
+                elif Path(non_versioned_path).exists():
+                    tessdata_path = non_versioned_path
+                else:
+                    # Default to versioned path (Tesseract 5.x standard)
+                    tessdata_path = versioned_path
         
         os.environ["TESSDATA_PREFIX"] = tessdata_path
         LOGGER.info("TESSDATA_PREFIX set to %s", tessdata_path)

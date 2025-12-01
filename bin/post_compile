@@ -7,9 +7,9 @@ set -e
 echo "-----> Setting up Tesseract language data"
 
 TESSDATA_SOURCE="./tessdata"
-TESSDATA_TARGET="/usr/share/tesseract-ocr/5/tessdata"
+TESSDATA_TARGET="./tessdata_final"
 
-# Create target directory if it doesn't exist
+# Create target directory in app directory (writable location)
 mkdir -p "$TESSDATA_TARGET"
 
 # Copy language files if they exist
@@ -25,6 +25,7 @@ if [ -d "$TESSDATA_SOURCE" ]; then
     echo "Language data files copied successfully"
     echo "Available languages:"
     ls -1 "$TESSDATA_TARGET"/*.traineddata 2>/dev/null | xargs -n1 basename | sed 's/\.traineddata$//' || echo "  (none)"
+    echo "TESSDATA_PREFIX will be set to: $TESSDATA_TARGET"
 else
     echo "Warning: $TESSDATA_SOURCE directory not found, skipping language data setup"
 fi
