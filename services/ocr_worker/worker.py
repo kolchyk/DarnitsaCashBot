@@ -41,7 +41,7 @@ async def process_message(payload: dict) -> None:
                 settings,
             )
         except UnreadableImageError as exc:
-            LOGGER.warning("Unreadable receipt %s: %s", receipt_id, exc)
+            LOGGER.warning("Unreadable receipt %s: %s", receipt_id, exc, exc_info=True)
             receipt.status = ReceiptStatus.REJECTED
             failure_payload = {"error": str(exc), "type": "unreadable_image"}
             receipt.ocr_payload = failure_payload
@@ -49,9 +49,17 @@ async def process_message(payload: dict) -> None:
             await _publish_failure(payload, failure_payload)
             return
         except TesseractRuntimeError as exc:
-            LOGGER.error("Tesseract failure for receipt %s: %s", receipt_id, exc)
+            LOGGER.error("Tesseract failure for receipt %s: %s", receipt_id, exc, exc_info=True)
             receipt.status = ReceiptStatus.REJECTED
             failure_payload = {"error": str(exc), "type": "tesseract_failure"}
+            receipt.ocr_payload = failure_payload
+            await session.commit()
+            await _publish_failure(payload, failure_payload)
+            return
+        except Exception as exc:
+            LOGGER.error("Unexpected error processing receipt %s: %s", receipt_id, exc, exc_info=True)
+            receipt.status = ReceiptStatus.REJECTED
+            failure_payload = {"error": f"Unexpected error: {str(exc)}", "type": "processing_error"}
             receipt.ocr_payload = failure_payload
             await session.commit()
             await _publish_failure(payload, failure_payload)

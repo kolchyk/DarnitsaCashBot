@@ -67,20 +67,56 @@ class TesseractRunner:
         tessdata_path = settings.tessdata_dir
         if not tessdata_path:
             # Check for app-local tessdata directory (created by post_compile script)
-            app_tessdata = Path("tessdata_final")
-            if app_tessdata.exists() and any(app_tessdata.glob("*.traineddata")):
+            # Try multiple possible locations for tessdata_final
+            possible_app_paths = [
+                Path("tessdata_final"),  # Relative to current working directory
+                Path.cwd() / "tessdata_final",  # Explicitly relative to CWD
+                Path(__file__).parent.parent.parent / "tessdata_final",  # Relative to this file
+            ]
+            
+            app_tessdata = None
+            for path_candidate in possible_app_paths:
+                if path_candidate.exists() and any(path_candidate.glob("*.traineddata")):
+                    app_tessdata = path_candidate
+                    LOGGER.info("Found tessdata_final at %s", app_tessdata)
+                    break
+            
+            if app_tessdata:
                 tessdata_path = str(app_tessdata.absolute())
+                # Verify Ukrainian language file exists
+                ukr_file = app_tessdata / "ukr.traineddata"
+                if not ukr_file.exists():
+                    LOGGER.warning("Ukrainian language file not found at %s", ukr_file)
             else:
+                LOGGER.info("tessdata_final not found, trying system paths")
                 # Try system paths: versioned (Tesseract 5.x) then non-versioned
                 versioned_path = "/usr/share/tesseract-ocr/5/tessdata"
                 non_versioned_path = "/usr/share/tesseract-ocr/tessdata"
                 if Path(versioned_path).exists():
                     tessdata_path = versioned_path
+                    LOGGER.info("Using system tessdata at %s", tessdata_path)
                 elif Path(non_versioned_path).exists():
                     tessdata_path = non_versioned_path
+                    LOGGER.info("Using system tessdata at %s", tessdata_path)
                 else:
                     # Default to versioned path (Tesseract 5.x standard)
                     tessdata_path = versioned_path
+                    LOGGER.warning("System tessdata not found, defaulting to %s (may not exist)", tessdata_path)
+        
+        # Verify language files exist before setting TESSDATA_PREFIX
+        tessdata_dir = Path(tessdata_path)
+        if tessdata_dir.exists():
+            available_langs = list(tessdata_dir.glob("*.traineddata"))
+            lang_names = [f.stem for f in available_langs]
+            LOGGER.info("Available language files: %s", ", ".join(lang_names) if lang_names else "none")
+            
+            # Check if required languages are available
+            required_langs = ["ukr", "rus", "eng"]
+            missing_langs = [lang for lang in required_langs if f"{lang}.traineddata" not in [f.name for f in available_langs]]
+            if missing_langs:
+                LOGGER.error("Missing required language files: %s in %s", ", ".join(missing_langs), tessdata_path)
+        else:
+            LOGGER.error("TESSDATA directory does not exist: %s", tessdata_path)
         
         os.environ["TESSDATA_PREFIX"] = tessdata_path
         LOGGER.info("TESSDATA_PREFIX set to %s", tessdata_path)
@@ -147,6 +183,8 @@ class TesseractRunner:
         if profile.whitelist:
             config += f' -c tessedit_char_whitelist="{profile.whitelist}"'
         try:
+            LOGGER.debug("Running Tesseract with lang=%s, config=%s, TESSDATA_PREFIX=%s", 
+                        self.languages, config, os.environ.get("TESSDATA_PREFIX"))
             dict_output = pytesseract.image_to_data(
                 image,
                 lang=self.languages,
@@ -154,7 +192,13 @@ class TesseractRunner:
                 output_type=Output.DICT,
             )
         except pytesseract.TesseractError as exc:  # pragma: no cover
-            raise TesseractRuntimeError(str(exc)) from exc
+            error_msg = str(exc)
+            LOGGER.error("Tesseract error: %s (lang=%s, TESSDATA_PREFIX=%s)", 
+                        error_msg, self.languages, os.environ.get("TESSDATA_PREFIX"))
+            # Provide more helpful error message for missing language files
+            if "Error opening data file" in error_msg or "Unable to load" in error_msg:
+                error_msg = f"{error_msg} (Check if language files exist in TESSDATA_PREFIX={os.environ.get('TESSDATA_PREFIX')})"
+            raise TesseractRuntimeError(error_msg) from exc
 
         tokens: list[OcrToken] = []
         confidences: list[float] = []

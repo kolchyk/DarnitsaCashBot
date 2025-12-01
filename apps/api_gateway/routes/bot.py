@@ -204,11 +204,13 @@ async def upload_receipt(
     # Trigger OCR processing in background
     async def process_ocr():
         try:
+            logger.info(f"Starting OCR processing for receipt {receipt.id}, storage_key={object_key}")
             from services.ocr_worker.worker import process_message
             await process_message({
                 "receipt_id": str(receipt.id),
                 "storage_key": object_key,
             })
+            logger.info(f"OCR processing completed for receipt {receipt.id}")
         except Exception as e:
             logger.error(
                 f"Failed to process OCR for receipt {receipt.id}: {type(e).__name__}: {str(e)}",
