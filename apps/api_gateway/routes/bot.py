@@ -6,12 +6,15 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from uuid import UUID
 
 from libs.common.analytics import AnalyticsClient
 from libs.common.rate_limit import RateLimiter
 from libs.common.storage import StorageClient
+from libs.data.models import Receipt
 from libs.data.repositories import ReceiptRepository, UserRepository
 
 from ..dependencies import (
@@ -21,6 +24,7 @@ from ..dependencies import (
     get_storage_client,
 )
 from ..schemas import (
+    ManualReceiptDataRequest,
     ReceiptHistoryItem,
     ReceiptResponse,
     ReceiptUploadResponse,
@@ -216,6 +220,111 @@ async def upload_receipt(
         receipt=ReceiptResponse(receipt_id=receipt.id, status=receipt.status),
         queue_reference="receipts.incoming",
     )
+
+
+@router.get("/receipts/{receipt_id}", response_model=ReceiptResponse)
+async def get_receipt_status(
+    receipt_id: UUID,
+    session: AsyncSession = Depends(get_session_dep),
+):
+    stmt = select(Receipt).where(Receipt.id == receipt_id)
+    result = await session.execute(stmt)
+    receipt = result.scalar_one_or_none()
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    
+    # Check if OCR failed by looking at ocr_payload
+    ocr_payload = receipt.ocr_payload
+    if ocr_payload and isinstance(ocr_payload, dict):
+        # If ocr_payload has error field, it means OCR failed
+        if ocr_payload.get("error") or ocr_payload.get("type") in ("unreadable_image", "tesseract_failure"):
+            return ReceiptResponse(receipt_id=receipt.id, status="rejected")
+    
+    return ReceiptResponse(receipt_id=receipt.id, status=receipt.status)
+
+
+@router.post("/receipts/{receipt_id}/manual", response_model=ReceiptResponse)
+async def submit_manual_receipt_data(
+    receipt_id: UUID,
+    data: ManualReceiptDataRequest,
+    session: AsyncSession = Depends(get_session_dep),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+):
+    stmt = select(Receipt).where(Receipt.id == receipt_id)
+    result = await session.execute(stmt)
+    receipt = result.scalar_one_or_none()
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    
+    # Build OCR payload from manual input
+    line_items = []
+    for item in data.line_items:
+        name = item.get("name", "")
+        quantity = int(item.get("quantity", 1))
+        price_str = str(item.get("price", "0"))
+        # Convert price to kopecks (minor units)
+        try:
+            price_float = float(price_str.replace(",", "."))
+            price_kopecks = int(round(price_float * 100))
+        except (ValueError, TypeError):
+            price_kopecks = 0
+        
+        line_items.append({
+            "name": name,
+            "quantity": quantity,
+            "price": price_kopecks,
+            "confidence": 1.0,  # Manual input has full confidence
+            "sku_code": None,
+            "sku_match_score": 0.0,
+        })
+    
+    ocr_payload = {
+        "merchant": data.merchant,
+        "purchase_ts": data.purchase_date,
+        "total": None,
+        "line_items": line_items,
+        "confidence": {
+            "mean": 1.0,
+            "min": 1.0,
+            "max": 1.0,
+            "token_count": len(line_items),
+            "auto_accept_candidate": True,
+        },
+        "preprocessing": {},
+        "tesseract_stats": {},
+        "manual_review_required": False,
+        "anomalies": [],
+        "manual_input": True,
+    }
+    
+    receipt.ocr_payload = ocr_payload
+    if data.merchant:
+        receipt.merchant = data.merchant
+    if data.purchase_date:
+        try:
+            receipt.purchase_ts = datetime.fromisoformat(data.purchase_date)
+        except ValueError:
+            pass
+    receipt.status = "processing"
+    await session.commit()
+    
+    # Trigger rules engine evaluation
+    async def process_manual_receipt():
+        try:
+            from services.rules_engine.service import evaluate
+            await evaluate({
+                "receipt_id": str(receipt_id),
+                "ocr_payload": ocr_payload,
+            })
+        except Exception as e:
+            logger.error(
+                f"Failed to evaluate manual receipt {receipt_id}: {type(e).__name__}: {str(e)}",
+                exc_info=True,
+            )
+    
+    background_tasks.add_task(process_manual_receipt)
+    
+    return ReceiptResponse(receipt_id=receipt.id, status=receipt.status)
 
 
 @router.get("/history/{telegram_id}", response_model=list[ReceiptHistoryItem])

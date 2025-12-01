@@ -63,3 +63,22 @@ class ReceiptApiClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_receipt_status(self, *, receipt_id: str) -> dict[str, Any]:
+        response = await self._client.get(f"/bot/receipts/{receipt_id}")
+        response.raise_for_status()
+        return response.json()
+
+    async def submit_manual_receipt_data(
+        self, *, receipt_id: str, merchant: str | None, purchase_date: str | None, line_items: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        response = await self._client.post(
+            f"/bot/receipts/{receipt_id}/manual",
+            json={
+                "merchant": merchant,
+                "purchase_date": purchase_date,
+                "line_items": line_items,
+            },
+        )
+        response.raise_for_status()
+        return response.json()
+

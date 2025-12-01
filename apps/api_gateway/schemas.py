@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -35,4 +36,10 @@ class ReceiptHistoryItem(BaseModel):
 class ReceiptUploadResponse(BaseModel):
     receipt: ReceiptResponse
     queue_reference: str
+
+
+class ManualReceiptDataRequest(BaseModel):
+    merchant: str | None = None
+    purchase_date: str | None = None  # ISO format date string
+    line_items: list[dict[str, Any]]  # List of items with name, quantity, price
 
