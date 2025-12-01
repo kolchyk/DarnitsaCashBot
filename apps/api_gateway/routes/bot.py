@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from libs.common.analytics import AnalyticsClient
@@ -28,6 +30,8 @@ from ..schemas import (
 
 router = APIRouter()
 
+logger = logging.getLogger(__name__)
+
 MAX_FILE_SIZE = 10 * 1024 * 1024
 SUPPORTED_CONTENT_TYPES = {"image/jpeg", "image/png"}
 
@@ -37,19 +41,71 @@ async def upsert_user(
     payload: UserUpsertRequest,
     session: AsyncSession = Depends(get_session_dep),
 ):
-    user_repo = UserRepository(session)
-    user = await user_repo.upsert_user(
-        telegram_id=payload.telegram_id,
-        phone_number=payload.phone_number,
-        locale=payload.locale,
-    )
-    await session.commit()
-    return UserResponse(
-        id=user.id,
-        telegram_id=user.telegram_id,
-        locale=user.locale,
-        has_phone=bool(user.phone_number),
-    )
+    try:
+        user_repo = UserRepository(session)
+        user = await user_repo.upsert_user(
+            telegram_id=payload.telegram_id,
+            phone_number=payload.phone_number,
+            locale=payload.locale,
+        )
+        await session.commit()
+        return UserResponse(
+            id=user.id,
+            telegram_id=user.telegram_id,
+            locale=user.locale,
+            has_phone=bool(user.phone_number),
+        )
+    except IntegrityError as e:
+        await session.rollback()
+        logger.error(
+            f"Database integrity error while upserting user: telegram_id={payload.telegram_id}, "
+            f"error={str(e)}",
+            exc_info=True,
+        )
+        # Check if it's a unique constraint violation (duplicate telegram_id)
+        if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+            raise HTTPException(
+                status_code=409,
+                detail=f"User with telegram_id {payload.telegram_id} already exists",
+            ) from e
+        raise HTTPException(
+            status_code=400,
+            detail="Database constraint violation",
+        ) from e
+    except ValueError as e:
+        await session.rollback()
+        logger.error(
+            f"Value error while upserting user: telegram_id={payload.telegram_id}, "
+            f"error={str(e)}",
+            exc_info=True,
+        )
+        # Likely an encryption error
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error during user registration",
+        ) from e
+    except SQLAlchemyError as e:
+        await session.rollback()
+        logger.error(
+            f"Database error while upserting user: telegram_id={payload.telegram_id}, "
+            f"error={str(e)}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Database error occurred",
+        ) from e
+    except Exception as e:
+        await session.rollback()
+        logger.error(
+            f"Unexpected error while upserting user: telegram_id={payload.telegram_id}, "
+            f"error_type={type(e).__name__}, error={str(e)}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error",
+        ) from e
 
 
 @router.post("/receipts", response_model=ReceiptUploadResponse)
