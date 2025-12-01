@@ -63,7 +63,21 @@ class TesseractRunner:
                 LOGGER.info("Auto-detected tesseract at %s", detected_path)
         
         # Set TESSDATA_PREFIX - use configured value or default Heroku/Ubuntu location
-        tessdata_path = settings.tessdata_dir or "/usr/share/tesseract-ocr/tessdata"
+        # Tesseract 5.x uses versioned directory: /usr/share/tesseract-ocr/5/tessdata/
+        # Fallback to non-versioned path for older installations
+        tessdata_path = settings.tessdata_dir
+        if not tessdata_path:
+            # Try versioned path first (Tesseract 5.x), then fallback to non-versioned
+            versioned_path = "/usr/share/tesseract-ocr/5/tessdata"
+            non_versioned_path = "/usr/share/tesseract-ocr/tessdata"
+            if Path(versioned_path).exists():
+                tessdata_path = versioned_path
+            elif Path(non_versioned_path).exists():
+                tessdata_path = non_versioned_path
+            else:
+                # Default to versioned path (Tesseract 5.x standard)
+                tessdata_path = versioned_path
+        
         os.environ["TESSDATA_PREFIX"] = tessdata_path
         LOGGER.info("TESSDATA_PREFIX set to %s", tessdata_path)
         self.languages = settings.ocr_languages
