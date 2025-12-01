@@ -9,8 +9,7 @@ from libs.common import configure_logging, get_settings
 from libs.common.messaging import MessageBroker, QueueNames
 from libs.data import async_session_factory
 from libs.data.models import LineItem, Receipt
-from libs.data.repositories import CatalogRepository, ReceiptRepository
-from .matcher import is_receipt_eligible
+from libs.data.repositories import ReceiptRepository
 
 ELIGIBILITY_WINDOW_DAYS = 7
 MAX_RECEIPTS_PER_DAY = 3
@@ -23,6 +22,16 @@ async def evaluate(payload: dict, broker: MessageBroker) -> None:
         if not receipt:
             return
         ocr_payload = payload.get("ocr_payload") or {}
+        
+        # Проверяем, не является ли это ошибкой OCR
+        if ocr_payload.get("error") or payload.get("status") == "failed":
+            receipt.status = "rejected"
+            await session.commit()
+            await broker.publish(
+                QueueNames.RULE_DECISIONS,
+                {"receipt_id": str(receipt.id), "status": "rejected", "reason": "ocr_failed"},
+            )
+            return
 
         repo = ReceiptRepository(session)
         daily_count = await repo.daily_submission_count(receipt.user_id)
@@ -41,38 +50,43 @@ async def evaluate(payload: dict, broker: MessageBroker) -> None:
                 await broker.publish(QueueNames.RULE_DECISIONS, {"receipt_id": str(receipt.id), "status": "rejected", "reason": "expired"})
                 return
 
-        catalog_repo = CatalogRepository(session)
-        catalog = await catalog_repo.list_active()
-        aliases = {item.sku_code: [alias.lower() for alias in item.product_aliases] for item in catalog}
-
+        # Принимаем все чеки, которые успешно прошли OCR
+        # Распознаем и сохраняем все товары из чека
         line_items = ocr_payload.get("line_items", [])
-        matched = is_receipt_eligible(aliases, line_items)
+        
+        # Проверяем, что OCR успешно распознал хотя бы один товар
+        has_items = len(line_items) > 0
+        
+        # Сохраняем все распознанные товары
         for item in line_items:
-            name = item.get("name", "").lower()
+            name = item.get("name", "")
             quantity = int(item.get("quantity", 1))
-            price = int(item.get("price", 0))
+            price = item.get("price")
+            if price is None:
+                price = 0
+            else:
+                price = int(price)
             confidence = float(item.get("confidence", 0))
-            sku_code = None
-            for code, alias_list in aliases.items():
-                if any(alias in name for alias in alias_list):
-                    sku_code = code
-                    break
+            sku_code = item.get("sku_code")  # Используем SKU из OCR, если есть
+            
             session.add(
                 LineItem(
                     receipt_id=receipt.id,
                     sku_code=sku_code,
-                    product_name=item.get("name", ""),
+                    product_name=name,
                     quantity=quantity,
                     unit_price=price,
                     total_price=price * quantity,
                     confidence=confidence,
                 )
             )
-        receipt.status = "accepted" if matched else "rejected"
+        
+        # Принимаем чек, если OCR успешно распознал товары
+        receipt.status = "accepted" if has_items else "rejected"
         await session.commit()
     await broker.publish(
         QueueNames.RULE_DECISIONS,
-        {"receipt_id": str(receipt_id), "status": receipt.status, "eligible": matched},
+        {"receipt_id": str(receipt_id), "status": receipt.status, "eligible": receipt.status == "accepted"},
     )
 
 

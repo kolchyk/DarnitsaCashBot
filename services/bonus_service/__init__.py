@@ -1,4 +1,4 @@
-"""Bonus payout worker interacting with EasyPay."""
+"""Bonus payout worker interacting with PortmoneDirect."""
 
 __all__ = ["main"]
 

@@ -3,14 +3,28 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class AppSettings(BaseSettings):
     """Centralised configuration loaded from environment variables."""
 
-    model_config = SettingsConfigDict(env_file=(".env", "env.example"), env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=(".env", "env.example"), env_file_encoding="utf-8", extra="ignore")
+    
+    @model_validator(mode="before")
+    @classmethod
+    def read_heroku_urls(cls, values: dict) -> dict:
+        """Read Heroku URLs from environment before validation."""
+        import os
+        if isinstance(values, dict):
+            if "DATABASE_URL" not in values:
+                values["DATABASE_URL"] = os.getenv("DATABASE_URL")
+            if "CLOUDAMQP_URL" not in values:
+                values["CLOUDAMQP_URL"] = os.getenv("CLOUDAMQP_URL")
+            if "REDIS_URL" not in values:
+                values["REDIS_URL"] = os.getenv("REDIS_URL")
+        return values
 
     app_env: Literal["local", "dev", "prod"] = "local"
     log_level: str = "INFO"
@@ -19,8 +33,8 @@ class AppSettings(BaseSettings):
     telegram_webhook_url: str | None = Field(default=None, alias="TELEGRAM_WEBHOOK_URL")
     telegram_admin_ids: str = Field(default="", alias="TELEGRAM_ADMIN_IDS")
 
-    # Heroku DATABASE_URL support
-    _heroku_database_url: str | None = Field(default=None, alias="DATABASE_URL")
+    # Heroku DATABASE_URL support (internal, not exposed as field)
+    _heroku_database_url: str | None = PrivateAttr(default=None)
     
     postgres_host: str = Field(default="localhost", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
@@ -31,8 +45,11 @@ class AppSettings(BaseSettings):
     @model_validator(mode="after")
     def parse_heroku_database_url(self):
         """Parse Heroku DATABASE_URL if provided."""
-        if self._heroku_database_url:
-            parsed = urlparse(self._heroku_database_url)
+        import os
+        db_url = os.getenv("DATABASE_URL") or self._heroku_database_url
+        if db_url:
+            self._heroku_database_url = db_url
+            parsed = urlparse(db_url)
             self.postgres_user = parsed.username or self.postgres_user
             self.postgres_password = parsed.password or self.postgres_password
             self.postgres_host = parsed.hostname or self.postgres_host
@@ -45,8 +62,8 @@ class AppSettings(BaseSettings):
     storage_access_key: str = Field(default="miniokey", alias="STORAGE_ACCESS_KEY")
     storage_secret_key: str = Field(default="miniopass", alias="STORAGE_SECRET_KEY")
 
-    # Heroku CLOUDAMQP_URL support
-    _heroku_cloudamqp_url: str | None = Field(default=None, alias="CLOUDAMQP_URL")
+    # Heroku CLOUDAMQP_URL support (internal, not exposed as field)
+    _heroku_cloudamqp_url: str | None = PrivateAttr(default=None)
     
     rabbitmq_host: str = Field(default="localhost", alias="RABBITMQ_HOST")
     rabbitmq_port: int = Field(default=5672, alias="RABBITMQ_PORT")
@@ -56,16 +73,19 @@ class AppSettings(BaseSettings):
     @model_validator(mode="after")
     def parse_heroku_rabbitmq_url(self):
         """Parse Heroku CLOUDAMQP_URL if provided."""
-        if self._heroku_cloudamqp_url:
-            parsed = urlparse(self._heroku_cloudamqp_url)
+        import os
+        amqp_url = os.getenv("CLOUDAMQP_URL") or self._heroku_cloudamqp_url
+        if amqp_url:
+            self._heroku_cloudamqp_url = amqp_url
+            parsed = urlparse(amqp_url)
             self.rabbitmq_host = parsed.hostname or self.rabbitmq_host
             self.rabbitmq_port = parsed.port or self.rabbitmq_port
             self.rabbitmq_user = parsed.username or self.rabbitmq_user
             self.rabbitmq_password = parsed.password or self.rabbitmq_password
         return self
 
-    # Heroku REDIS_URL support
-    _heroku_redis_url: str | None = Field(default=None, alias="REDIS_URL")
+    # Heroku REDIS_URL support (internal, not exposed as field)
+    _heroku_redis_url: str | None = PrivateAttr(default=None)
     
     redis_host: str = Field(default="localhost", alias="REDIS_HOST")
     redis_port: int = Field(default=6379, alias="REDIS_PORT")
@@ -73,8 +93,11 @@ class AppSettings(BaseSettings):
     @model_validator(mode="after")
     def parse_heroku_redis_url(self):
         """Parse Heroku REDIS_URL if provided."""
-        if self._heroku_redis_url:
-            parsed = urlparse(self._heroku_redis_url)
+        import os
+        redis_url = os.getenv("REDIS_URL") or self._heroku_redis_url
+        if redis_url:
+            self._heroku_redis_url = redis_url
+            parsed = urlparse(redis_url)
             self.redis_host = parsed.hostname or self.redis_host
             self.redis_port = parsed.port or self.redis_port
         return self

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -103,7 +104,11 @@ class PortmoneDirectClient:
         }
         self._lang = self.settings.portmone_lang
         base = self.settings.portmone_api_base.rstrip("/") + "/"
-        cert = str(self.settings.portmone_cert_path) if self.settings.portmone_cert_path else None
+        cert = None
+        if self.settings.portmone_cert_path:
+            cert_path = Path(self.settings.portmone_cert_path)
+            if cert_path.exists() and cert_path.is_file():
+                cert = str(cert_path)
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(base_url=base, cert=cert, timeout=timeout)
 

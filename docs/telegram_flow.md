@@ -6,7 +6,7 @@
 
 - **Основная цель**: автоматизировать процесс "чек на вход → выплата на выход" для украинских покупателей, награждая каждый принятый чек Darnitsa пополнением мобильного счета на 1 UAH.
 - **Основополагающие документы**: держите открытыми `prd.md`, `OCR.md` и `easy.md` при работе с ботом для проверки предположений (окно приемлемости, задержка выплат, защита от мошенничества).
-- **Инфраструктура**: PostgreSQL, RabbitMQ, Redis, хранилище, совместимое с S3, OCR-воркеры, движок правил и подключение к EasyPay/Portmone должны быть доступны перед включением бота.
+- **Инфраструктура**: PostgreSQL, RabbitMQ, Redis, хранилище, совместимое с S3, OCR-воркеры, движок правил и подключение к PortmoneDirect должны быть доступны перед включением бота.
 
 ## 2. Схема разговора в Telegram
 
@@ -23,7 +23,7 @@
 | --- | --- | --- |
 | `/start` | `commands.cmd_start` | Запуск онбординга, отображение контактной клавиатуры, регистрация пользователя. |
 | `/help` | `commands.cmd_help` | Объяснение механики награды в 1 UAH и выделение `/history` + `/change_phone`. |
-| `/history` | `commands.cmd_history` | Получение последних чеков через `/bot/history/{telegram_id}` и отображение ссылок на EasyPay. |
+| `/history` | `commands.cmd_history` | Получение последних чеков через `/bot/history/{telegram_id}` и отображение ссылок на Portmone (bill_id + статус). |
 | `/change_phone` | `commands.cmd_change_phone` | Повторное открытие контактной клавиатуры. Запуск `handle_contact` при нажатии пользователем. |
 
 Хранение состояния (телефон, локаль, последние статусы) находится в backend БД; бот остается stateless, кроме внедренного `ReceiptApiClient`.
@@ -55,7 +55,7 @@
 | 1. Прием | `apps/api_gateway/routes/bot.py::upload_receipt` | Сохраняет пользователя + чек, сохраняет медиа в S3/MinIO через `StorageClient`, логирует аналитику и публикует в `QueueNames.RECEIPTS`. |
 | 2. OCR | `services/ocr_worker/worker.py` | Потребляет сообщения о чеках, вызывает OCR-сервис (`http://ocr-mock:8081/ocr` по умолчанию), сохраняет JSON-вывод в `Receipt` и отправляет в `QueueNames.OCR_RESULTS`. |
 | 3. Приемлемость | `services/rules_engine/service.py` | Загружает алиасы каталога (`CatalogRepository`), запускает `is_receipt_eligible`, записывает `LineItem`s, обновляет статус на `accepted` или `rejected`, затем публикует в `QueueNames.RULE_DECISIONS`. |
-| 4. Оркестрация бонусов | `services/bonus_service/main.py` | При `status=accepted` расшифровывает MSISDN, создает/обновляет `BonusTransaction`, отправляет в EasyPay/Portmone (см. `easy.md`), обновляет статусы, отправляет аналитику и проталкивает события статуса в `QueueNames.BONUS_EVENTS`. |
+| 4. Оркестрация бонусов | `services/bonus_service/main.py` | При `status=accepted` расшифровывает MSISDN, создает/обновляет `BonusTransaction`, отправляет в PortmoneDirect (см. `easy.md`), обновляет статусы, отправляет аналитику и проталкивает события статуса в `QueueNames.BONUS_EVENTS`. |
 | 5. Уведомления | `apps/api_gateway/background.py::bonus_event_listener` | Прослушивает `bonus.events`, затем делегирует `libs.common.notifications.NotificationService` для отправки финальных сообщений обратно в Telegram. |
 
 Каждый переход сохраняет корреляционную нагрузку (`receipt_id`, `user_id`, `telegram_id`, `checksum`), чтобы логи можно было отслеживать от начала до конца.
@@ -103,7 +103,7 @@
 - **Логи**: Включите структурированное логирование через `configure_logging(settings.log_level)` везде; включайте `receipt_id`, `telegram_id` и ссылки на Portmone (`bill_id`, `contractNumber`) в каждую запись лога для ускорения реагирования на инциденты.
 - **Предложения по оповещению**:
   - Частота сбоев OCR >5% за 5 минут.
-  - Серия `status=fail` EasyPay/Portmone >3 или тишина webhook >30 секунд.
+  - Серия `status=fail` PortmoneDirect >3 или тишина webhook >30 секунд.
   - Глубина очереди `bonus.events` >50 (уведомления застряли).
 - **Общие шаги восстановления**:
   - **Чек застрял в `processing`**: поставьте сообщение обратно в очередь `receipts.incoming` или повторно запустите OCR через ручной эндпоинт, как только логи подтвердят доступность хранилища.

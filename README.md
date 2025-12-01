@@ -25,6 +25,8 @@ poetry run python -m apps.telegram_bot.main
 ## PortmoneDirect Sandbox
 
 - Copy the `PORTMONE_*` variables from `env.example` and update them with the credentials and TLS bundle issued by PortmoneDirect.
+- **Настройка авторизации**: Подробная инструкция по настройке авторизации Portmone API доступна в [docs/portmone_auth.md](docs/portmone_auth.md).
+- **Проверка подключения**: Используйте скрипт `python scripts/check_portmone_api.py` для проверки подключения к API и корректности учетных данных.
 - `docker compose up portmone-mock` exposes `http://localhost:8082/api/directcash/`, allowing end-to-end tests without touching the real API. Point `PORTMONE_API_BASE` to this URL in `.env`.
 - The FastAPI gateway now exposes `POST /portmone/webhook`. Protect it via `PORTMONE_WEBHOOK_TOKEN` and configure the same token on the Portmone side.
 - Bonus payouts are orchestrated through the Portmone client in `services/bonus_service`. Prometheus counters (`portmone_request_total`, `portmone_fail_total{code}`, `portmone_request_latency_seconds`) monitor integration health.

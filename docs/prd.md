@@ -2,22 +2,22 @@
 
 ## 1. Overview
 - **Vision**: Reward shoppers who purchase Darnitsa pharmaceuticals by crediting their mobile balance automatically after they submit a proof-of-purchase receipt in Telegram.
-- **Product summary**: A Telegram bot (`DarnitsaCashBot`) collects receipt photos, a backend extracts Darnitsa line items and prices, and an EasyPay integration tops up the phone number shared by the user with a fixed 1₴ bonus per eligible receipt.
+- **Product summary**: A Telegram bot (`DarnitsaCashBot`) collects receipt photos, a backend extracts Darnitsa line items and prices, and a PortmoneDirect integration tops up the phone number shared by the user with a fixed 1₴ bonus per eligible receipt.
 - **Primary users**: Retail customers purchasing Darnitsa products in Ukrainian pharmacies; internal support/marketing analysts.
 - **Target release**: MVP within 6 weeks, focusing on Ukrainian market and top-3 mobile operators.
 
-**MVP scope**: This iteration is expressly about proving that the intake → OCR (see `OCR.md`) → rules → EasyPay payout flow described in `easy.md` works reliably for a representative set of receipts. Anything beyond that validation is documented as future or optional work and should not block this release.
+**MVP scope**: This iteration is expressly about proving that the intake → OCR (see `OCR.md`) → rules → PortmoneDirect payout flow described in `easy.md` works reliably for a representative set of receipts. Anything beyond that validation is documented as future or optional work and should not block this release.
 
 ### 1.1 Goals
 1. Demonstrate automated validation of Darnitsa receipts received via Telegram with ≥95% precision on the curated MVP dataset.
-2. Confirm the EasyPay payout completes within ≤2 minutes from upload to confirmation for accepted receipts under nominal MVP load.
+2. Confirm the PortmoneDirect payout completes within ≤2 minutes from upload to confirmation for accepted receipts under nominal MVP load.
 3. Provide only the minimal visibility (logs + lightweight counters) needed to trace each accepted receipt through payout; deeper analytics stay post-MVP.
 
 These goals define “done” for the MVP validation loop and intentionally exclude optimizations or experiences that do not affect the core flow.
 
 ### 1.2 Non-goals
 - Managing promotions for non-Darnitsa brands.
-- Supporting payout channels other than mobile top-up via EasyPay.
+- Supporting payout channels other than mobile top-up via PortmoneDirect.
 - Building a full loyalty wallet or points marketplace.
 
 Anything that does not directly improve the “receipt in → payout out” proof point should be treated as backlog fodder or experiments after the MVP readout.
@@ -28,13 +28,13 @@ For the MVP we only need the lean metrics that prove receipts progress through t
 - Daily Active Uploaders (unique users sending ≥1 receipt).
 - Receipt Acceptance Rate (approved / total uploaded).
 - Bonus Fulfillment Time (p90 under 120 seconds).
-- EasyPay Error Rate (failed payouts / payout attempts).
+- PortmoneDirect Error Rate (failed payouts / payout attempts).
 - Fraud Rejection Count (receipts flagged as duplicate/invalid).
 
 ## 3. Key Assumptions
 1. Users have Telegram installed and can share a Ukrainian mobile number.
 2. Pharmacies issue fiscal receipts that include product names and prices legible for OCR.
-3. EasyPay exposes a REST API for mobile top-ups with synchronous confirmation.
+3. PortmoneDirect exposes a REST API for mobile top-ups with synchronous confirmation.
 4. Darnitsa marketing can supply a SKU list / regexes to validate product names and optional GTIN markers.
 
 ## 4. Personas
@@ -54,9 +54,9 @@ For the MVP we only need the lean metrics that prove receipts progress through t
 3. Bot confirms receipt of the image and sends “Processing…” message.
 4. Backend stores the image, triggers OCR, and parses line items.
 5. Rule engine identifies Darnitsa products, validates minimum purchase rules, and computes reward eligibility.
-6. Bonus service triggers EasyPay mobile top-up for the stored MSISDN (1₴ per approved receipt).
+6. Bonus service triggers PortmoneDirect mobile top-up for the stored MSISDN (1₴ per approved receipt).
 7. Bot communicates the outcome:
-   - Success: “We added 1₴ to +380XX… via EasyPay. Thank you!”
+   - Success: “We added 1₴ to +380XX… via PortmoneDirect. Thank you!”
    - Failure: reason (illegible receipt, missing Darnitsa item, duplicate, payout error) and instructions.
 
 ## 7. System Architecture Overview
@@ -66,7 +66,7 @@ The following components represent the thinnest set required to exercise the MVP
 - **Receipt Service**: Handles media uploads, stores images in object storage, emits events to processing queue (e.g., RabbitMQ/Kafka).
 - **OCR Pipeline**: Stateless workers that call external OCR vendor, normalize text, and persist structured JSON.
 - **Catalog & Rules Engine**: Service maintaining Darnitsa SKU metadata and eligibility logic; exposes gRPC/REST to other services.
-- **Bonus Service**: Manages idempotent payout requests, interacts with EasyPay API, and updates BonusTransaction records.
+- **Bonus Service**: Manages idempotent payout requests, interacts with the PortmoneDirect API, and updates BonusTransaction records.
 - **Admin/API Gateway**: Provides REST APIs for bot, admin dashboard, and external hooks; handles auth, rate limiting, and audit logging.
 - **Observability Stack**: Centralized logging, metrics, and alerting (e.g., ELK + Prometheus) with correlation IDs.
 
@@ -100,15 +100,15 @@ Requirements below describe only what is necessary to ingest one receipt, judge 
 - Deduplicate receipts by hash of OCR text + total + timestamp; block submissions older than 7 days from purchase date.
 - Users can submit max 3 receipts per day (configurable).
 
-### 8.5 EasyPay Integration
-- Use EasyPay mobile top-up API with the following fields: merchant credentials, MSISDN, amount (1 UAH), transaction reference, callback URL.
-- All requests logged with correlation IDs tying Telegram user, receipt ID, and EasyPay transaction ID.
+### 8.5 PortmoneDirect Integration
+- Use PortmoneDirect mobile top-up API with the following fields: reseller credentials, MSISDN (`contractNumber`), amount (1 UAH), transaction reference, callback URL.
+- All requests logged with correlation IDs tying Telegram user, receipt ID, and Portmone `bill_id`.
 - Handle synchronous response plus async webhook (if available) to confirm final state.
-- Retries: exponential backoff up to 3 attempts when EasyPay returns transient errors; never duplicate payouts for the same receipt.
+- Retries: exponential backoff up to 3 attempts when Portmone returns transient errors; never duplicate payouts for the same receipt.
 
 ### 8.6 Notifications & History
 - Bot sends status updates (processing, success, failure) with inline buttons to resubmit or change number.
-- `/history` lists last 5 receipts with status, timestamp, and EasyPay reference.
+- `/history` lists last 5 receipts with status, timestamp, and Portmone reference.
 - Push reminder message if user starts but does not upload any receipt within 24 hours.
 
 ### 8.7 Admin & Support (Phase 2 placeholder)
@@ -117,7 +117,7 @@ Requirements below describe only what is necessary to ingest one receipt, judge 
 
 ## 9. Non-functional Requirements
 - **Reliability**: 99% uptime target for Telegram webhook and backend APIs; degraded mode allows manual processing queue.
-- **Performance**: OCR plus eligibility check within 90 seconds p95; EasyPay request initiated within 30 seconds of approval.
+- **Performance**: OCR plus eligibility check within 90 seconds p95; PortmoneDirect request initiated within 30 seconds of approval.
 - **Security**: Encrypt user phone numbers at rest, enforce GDPR-compliant data handling, audit log all admin actions.
 - **Scalability**: Design for 10k daily receipts with bursty traffic during campaigns.
 - **Compliance**: Follow Ukrainian promotional law; store consent records and opt-out mechanisms.
@@ -155,22 +155,22 @@ Focus on capturing the right events and logs so the MVP flow can be audited; pol
 - Log correlation IDs across bot, OCR, rule engine, and Portmone calls.
 
 ## 14. Rollout Plan & Dependencies
-Every phase below should exit only after we can demonstrate the linear receipt→OCR→rules→EasyPay flow operating in that environment; extra capabilities can trail behind.
+Every phase below should exit only after we can demonstrate the linear receipt→OCR→rules→PortmoneDirect flow operating in that environment; extra capabilities can trail behind.
 1. **Week 1-2**: Finalize legal/privacy text, Portmone contract, select OCR vendor, build Telegram bot skeleton.
 2. **Week 3-4**: Implement OCR pipeline, rules engine, Portmone integration (sandbox), internal admin views.
 3. **Week 5**: Prioritize end-to-end smoke and regression tests with sample receipts; run lightweight load tests only to the extent they protect the MVP flow, plus fraud rule tuning.
 4. **Week 6**: Pilot launch with limited audience (1000 users), monitor, then nationwide release.
-5. **Dependencies**: Darnitsa SKU catalog, EasyPay credentials, secure hosting, marketing comms plan.
+5. **Dependencies**: Darnitsa SKU catalog, Portmone credentials, secure hosting, marketing comms plan.
 
 ## 15. Risks & Open Questions
 - **OCR accuracy on thermal receipts** – may require heuristics or manual review capacity.
-- **EasyPay rate limits** – need confirmation on TPS caps and failover strategy.
+- **PortmoneDirect rate limits** – need confirmation on TPS caps and failover strategy.
 - **Fraud prevention** – need additional signals (geolocation, device fingerprint) for scale.
 - **Data retention** – confirm legal requirement for storing receipts beyond 90 days.
 - **Support volume** – define SLAs and staffing if manual reviews spike.
 
 ## 16. Appendices
-- **Sequence overview**: Telegram bot → Receipt service → OCR → Catalog matcher → Bonus service → EasyPay → Telegram notification.
+- **Sequence overview**: Telegram bot → Receipt service → OCR → Catalog matcher → Bonus service → PortmoneDirect → Telegram notification.
 - **Open API needs**: Provide REST endpoints for admin review (`/receipts/{id}`), payout status webhook handler (`/webhooks/easypay`).
 - **Future enhancements**: variable bonus amounts based on basket value, integration with loyalty ID, support for paperless e-receipts.
 
