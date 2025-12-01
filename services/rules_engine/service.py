@@ -18,6 +18,7 @@ from libs.common.constants import (
     MAX_RECEIPTS_PER_DAY,
 )
 from libs.common.crypto import Encryptor
+from libs.common.events import EVENT_RECEIPT_ACCEPTED, Event, get_event_bus
 from libs.common.portmone import PortmoneDirectClient
 from libs.data import async_session_factory
 from libs.data.models import LineItem, Receipt
@@ -62,25 +63,40 @@ async def evaluate(payload: dict) -> None:
         # Check that OCR successfully recognized at least one product
         has_items = len(line_items) > 0
         
-        # Check for "Дарниця" in product names
+        # Check for "Дарниця" in product names and merchant name
         # Use case-insensitive search
         # Include different cases and spelling variants in Ukrainian
         has_darnitsa = False
         
+        # First, check merchant name for Darnitsa keywords
+        if receipt.merchant:
+            merchant_lower = receipt.merchant.lower()
+            merchant_normalized = unidecode(unicodedata.normalize("NFC", receipt.merchant)).lower()
+            
+            # Check for Darnitsa in merchant name (Cyrillic)
+            if any(keyword in merchant_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC):
+                has_darnitsa = True
+                LOGGER.debug("Found Darnitsa keyword (cyrillic) in merchant: '%s'", receipt.merchant[:50])
+            # Check in normalized merchant name (transliteration)
+            elif any(keyword in merchant_normalized for keyword in DARNITSA_KEYWORDS_LATIN):
+                has_darnitsa = True
+                LOGGER.debug("Found Darnitsa keyword (latin) in merchant: '%s'", receipt.merchant[:50])
+        
         # Save all recognized products and check for Darnitsa
         LOGGER.info(
-            "Evaluating receipt %s: line_items=%d, daily_count=%d/%d",
+            "Evaluating receipt %s: line_items=%d, daily_count=%d/%d, merchant=%s",
             receipt_id,
             len(line_items),
             daily_count,
             MAX_RECEIPTS_PER_DAY,
+            receipt.merchant[:50] if receipt.merchant else "None",
         )
         
         for item in line_items:
             # Get original text (now 'name' contains original text, not normalized)
             original_name = item.get("name", "")
             # Normalize for Latin keyword matching if needed
-            normalized_name = unidecode(unicodedata.normalize("NFC", original_name)).upper()
+            normalized_name = unidecode(unicodedata.normalize("NFC", original_name))
             
             original_lower = original_name.lower()
             normalized_lower = normalized_name.lower()
