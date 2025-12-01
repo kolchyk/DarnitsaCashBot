@@ -36,11 +36,15 @@ def create_redis_client(
     
     if is_heroku_redis:
         # Heroku Redis uses SSL with self-signed certificates
-        # Disable certificate verification similar to Postgres SSL handling
+        # Create SSL context manually to avoid compatibility issues with redis-py 5.x
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
         return redis.from_url(
             redis_url,
             decode_responses=decode_responses,
-            ssl_cert_reqs=ssl.CERT_NONE,
+            ssl=ssl_context,
         )
     
     return redis.from_url(redis_url, decode_responses=decode_responses)
