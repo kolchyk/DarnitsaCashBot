@@ -21,8 +21,8 @@ class RateLimiter:
         self.limit = limit
         self.ttl_seconds = ttl_seconds
         self.settings = settings or get_settings()
-        self._redis = redis_client or redis.Redis(
-            host=self.settings.redis_host, port=self.settings.redis_port, decode_responses=True
+        self._redis = redis_client or redis.from_url(
+            self.settings.redis_url, decode_responses=True
         )
 
     async def check(self, key: str) -> bool:

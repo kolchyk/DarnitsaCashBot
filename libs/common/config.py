@@ -66,6 +66,7 @@ class AppSettings(BaseSettings):
     
     redis_host: str = Field(default="localhost", alias="REDIS_HOST")
     redis_port: int = Field(default=6379, alias="REDIS_PORT")
+    redis_password: str | None = Field(default=None, alias="REDIS_PASSWORD")
     
     @model_validator(mode="after")
     def parse_heroku_redis_url(self):
@@ -77,7 +78,18 @@ class AppSettings(BaseSettings):
             parsed = urlparse(redis_url)
             self.redis_host = parsed.hostname or self.redis_host
             self.redis_port = parsed.port or self.redis_port
+            self.redis_password = parsed.password or self.redis_password
         return self
+    
+    @property
+    def redis_url(self) -> str:
+        """Get Redis URL, preferring Heroku REDIS_URL if available."""
+        if self._heroku_redis_url:
+            return self._heroku_redis_url
+        # Build URL from components
+        if self.redis_password:
+            return f"redis://:{self.redis_password}@{self.redis_host}:{self.redis_port}"
+        return f"redis://{self.redis_host}:{self.redis_port}"
 
     easypay_api_base: str = Field(default="http://localhost:8080", alias="EASYPAY_API_BASE")
     easypay_merchant_id: str = Field(default="merchant", alias="EASYPAY_MERCHANT_ID")
