@@ -12,7 +12,8 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "users"
 
     telegram_id: Mapped[int] = mapped_column(unique=True, index=True)
-    phone_number: Mapped[str | None] = mapped_column(String(32))
+    phone_number: Mapped[str | None] = mapped_column(String(256))
+    phone_hash: Mapped[str | None] = mapped_column(String(128), index=True)
     locale: Mapped[str] = mapped_column(String(5), default="uk")
     consent_timestamp: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

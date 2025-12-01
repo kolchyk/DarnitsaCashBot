@@ -44,6 +44,7 @@ ruff = "^0.5.0"
 mypy = "^1.11.0"
 types-redis = "^4.6.0"
 types-pytz = "^2024.1"
+fakeredis = "^2.23.0"
 
 [tool.poetry.scripts]
 telegram-bot = "apps.telegram_bot.main:run"

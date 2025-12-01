@@ -9,6 +9,9 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from loguru import logger
+
+from libs.common.crypto import Encryptor
 from libs.data.models import LineItem, Receipt, User
 
 from ..dependencies import get_session_dep
@@ -25,17 +28,19 @@ async def search_receipts(
 ):
     stmt: Select[tuple[Receipt, User]] = select(Receipt, User).join(User, Receipt.user_id == User.id)
     if phone:
-        stmt = stmt.where(User.phone_number == phone)
+        stmt = stmt.where(User.phone_hash == Encryptor.hash_value(phone))
     if telegram_id:
         stmt = stmt.where(User.telegram_id == telegram_id)
+    encryptor = Encryptor()
     result = await session.execute(stmt.limit(50))
+    logger.info("Admin receipt search", phone=phone, telegram_id=telegram_id)
     data = [
         {
             "receipt_id": str(receipt.id),
             "status": receipt.status,
             "user_id": str(user.id),
             "telegram_id": user.telegram_id,
-            "phone_number": user.phone_number,
+            "phone_number": encryptor.decrypt(user.phone_number) if user.phone_number else None,
             "upload_ts": receipt.upload_ts,
             "merchant": receipt.merchant,
         }
@@ -57,6 +62,7 @@ async def override_receipt(
         raise HTTPException(status_code=404, detail="Receipt not found")
     receipt.status = status
     await session.commit()
+    logger.info("Admin override", receipt_id=str(receipt.id), status=status)
     return {"receipt_id": str(receipt.id), "status": receipt.status}
 
 
@@ -79,6 +85,7 @@ async def export_bonuses(session: AsyncSession = Depends(get_session_dep)):
     writer.writerow(["product_name", "sku_code", "quantity"])
     for row in result.all():
         writer.writerow(row)
+    logger.info("Admin bonuses export generated")
     return Response(
         content=buffer.getvalue(),
         media_type="text/csv",

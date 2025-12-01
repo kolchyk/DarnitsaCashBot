@@ -10,6 +10,7 @@ from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt,
 from libs.common import configure_logging, get_settings
 from libs.common.analytics import AnalyticsClient
 from libs.common.messaging import MessageBroker, QueueNames
+from libs.common.crypto import Encryptor
 from libs.data import async_session_factory
 from libs.data.models import BonusStatus, BonusTransaction, Receipt, User
 
@@ -19,20 +20,22 @@ async def trigger_payout(payload: dict, broker: MessageBroker, analytics: Analyt
         return
     settings = get_settings()
     receipt_id = UUID(payload["receipt_id"])
+    encryptor = Encryptor()
     async with async_session_factory() as session:
         receipt: Receipt | None = await session.get(Receipt, receipt_id)
         if not receipt:
             return
         await session.refresh(receipt, attribute_names=["user"])
         user: User | None = receipt.user
-        if not user or not user.phone_number:
+        phone = encryptor.decrypt(user.phone_number) if user and user.phone_number else None
+        if not phone:
             return
         bonus: BonusTransaction | None = receipt.bonus_transaction
         if not bonus:
             bonus = BonusTransaction(
                 receipt_id=receipt.id,
                 user_id=user.id,
-                msisdn=user.phone_number,
+                msisdn=phone,
                 amount=100,
             )
             session.add(bonus)

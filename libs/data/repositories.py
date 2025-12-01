@@ -8,11 +8,14 @@ from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import BonusTransaction, CatalogItem, LineItem, Receipt, User
+from libs.common.crypto import Encryptor
+import hashlib
 
 
 class UserRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, encryptor: Encryptor | None = None) -> None:
         self.session = session
+        self.encryptor = encryptor or Encryptor()
 
     async def upsert_user(
         self, telegram_id: int, phone_number: str | None, locale: str
@@ -20,11 +23,18 @@ class UserRepository:
         stmt = select(User).where(User.telegram_id == telegram_id)
         result = await self.session.execute(stmt)
         user = result.scalar_one_or_none()
+        encrypted, hashed = self._transform_phone(phone_number)
         if user:
-            user.phone_number = phone_number or user.phone_number
+            user.phone_number = encrypted or user.phone_number
+            user.phone_hash = hashed or user.phone_hash
             user.locale = locale
         else:
-            user = User(telegram_id=telegram_id, phone_number=phone_number, locale=locale)
+            user = User(
+                telegram_id=telegram_id,
+                phone_number=encrypted,
+                phone_hash=hashed,
+                locale=locale,
+            )
             self.session.add(user)
         await self.session.flush()
         return user
@@ -33,6 +43,18 @@ class UserRepository:
         stmt = select(User).where(User.telegram_id == telegram_id)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    def decrypt_phone(self, user: User) -> str | None:
+        if not user.phone_number:
+            return None
+        return self.encryptor.decrypt(user.phone_number)
+
+    def _transform_phone(self, phone_number: str | None) -> tuple[str | None, str | None]:
+        if not phone_number:
+            return None, None
+        encrypted = self.encryptor.encrypt(phone_number)
+        hashed = hashlib.sha256(phone_number.encode("utf-8")).hexdigest()
+        return encrypted, hashed
 
 
 class ReceiptRepository:

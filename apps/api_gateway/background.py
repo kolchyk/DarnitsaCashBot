@@ -17,10 +17,12 @@ async def bonus_event_listener(notification_service: NotificationService):
                 async for message in iterator:
                     async with message.process():
                         payload = json.loads(message.body.decode("utf-8"))
-                        await notification_service.send_message(
-                            chat_id=int(payload.get("telegram_id", 0)),
-                            text=f"Payout status: {payload.get('status')}",
-                        )
+                        telegram_id = payload.get("telegram_id")
+                        if telegram_id:
+                            await notification_service.send_message(
+                                chat_id=int(telegram_id),
+                                text=f"Payout status: {payload.get('status')}",
+                            )
         await asyncio.sleep(1)
 
 
