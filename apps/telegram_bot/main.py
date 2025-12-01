@@ -6,6 +6,7 @@ import signal
 import sys
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from libs.common import configure_logging, get_settings
@@ -26,7 +27,7 @@ async def main() -> None:
     logger.info(f"Starting bot with token: {config.token[:10]}...")
     logger.info(f"API Gateway URL: {settings.api_gateway_url}")
     
-    bot = Bot(token=config.token, parse_mode=ParseMode.HTML)
+    bot = Bot(token=config.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
     receipt_client = ReceiptApiClient(base_url=settings.api_gateway_url)
 
