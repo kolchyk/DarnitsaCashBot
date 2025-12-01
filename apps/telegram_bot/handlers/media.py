@@ -28,21 +28,37 @@ async def handle_receipt_photo(message: Message, receipt_client: ReceiptApiClien
     content = file_bytes.read()
 
     await message.answer("Обробляємо ваш чек...")
-    response = await receipt_client.upload_receipt(
-        telegram_id=message.from_user.id,
-        photo_bytes=content,
-        filename=f"receipt-{uuid4()}.jpg",
-        content_type="image/jpeg",
-    )
-    receipt_id = response["receipt"]["receipt_id"]
-    status_translated = translate_status(response["receipt"]["status"])
-    await message.answer(
-        f"Чек отримано. Виплата PortmoneDirect почнеться після підтвердження. Поточний статус: {status_translated}"
-    )
-    
-    # Check OCR status after a delay
-    bot = message.bot
-    asyncio.create_task(check_ocr_status(message.from_user.id, receipt_id, receipt_client, bot))
+    try:
+        response = await receipt_client.upload_receipt(
+            telegram_id=message.from_user.id,
+            photo_bytes=content,
+            filename=f"receipt-{uuid4()}.jpg",
+            content_type="image/jpeg",
+        )
+        receipt_id = response["receipt"]["receipt_id"]
+        status_translated = translate_status(response["receipt"]["status"])
+        await message.answer(
+            f"Чек отримано. Виплата PortmoneDirect почнеться після підтвердження. Поточний статус: {status_translated}"
+        )
+        
+        # Check OCR status after a delay
+        bot = message.bot
+        asyncio.create_task(check_ocr_status(message.from_user.id, receipt_id, receipt_client, bot))
+    except TimeoutError as e:
+        await message.answer(
+            "⏱️ Час очікування вичерпано при завантаженні чека. "
+            "Будь ласка, перевірте з'єднання з інтернетом та спробуйте ще раз."
+        )
+    except ConnectionError as e:
+        await message.answer(
+            "❌ Не вдалося підключитися до сервера. "
+            "Будь ласка, спробуйте пізніше або зверніться до підтримки."
+        )
+    except Exception as e:
+        await message.answer(
+            "❌ Сталася помилка при завантаженні чека. "
+            "Будь ласка, спробуйте ще раз або зверніться до підтримки."
+        )
 
 
 async def check_ocr_status(telegram_id: int, receipt_id: str, receipt_client: ReceiptApiClient, bot: Bot):

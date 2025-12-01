@@ -17,9 +17,15 @@ class ReceiptApiClient:
             base_url=self.base_url,
             timeout=10.0,
         )
+        # Longer timeout for file uploads (60 seconds)
+        self._upload_client = httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=60.0,
+        )
 
     async def close(self) -> None:
         await self._client.aclose()
+        await self._upload_client.aclose()
 
     async def register_user(
         self, *, telegram_id: int, phone_number: str | None, locale: str
@@ -54,9 +60,19 @@ class ReceiptApiClient:
         content_type: str,
     ) -> dict[str, Any]:
         files = {"file": (filename, photo_bytes, content_type)}
-        response = await self._client.post("/bot/receipts", params={"telegram_id": telegram_id}, files=files)
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = await self._upload_client.post("/bot/receipts", params={"telegram_id": telegram_id}, files=files)
+            response.raise_for_status()
+            return response.json()
+        except httpx.ConnectError as e:
+            logger.error(f"Failed to connect to API Gateway at {self.base_url}: {e}")
+            raise ConnectionError(f"API Gateway недоступен по адресу {self.base_url}. Убедитесь, что API Gateway запущен.") from e
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout uploading receipt to API Gateway: {e}")
+            raise TimeoutError("Превышено время ожидания при загрузке чека. Пожалуйста, попробуйте еще раз.") from e
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API Gateway returned error status {e.response.status_code}: {e.response.text}")
+            raise
 
     async def fetch_history(self, *, telegram_id: int) -> list[dict[str, Any]]:
         response = await self._client.get(f"/bot/history/{telegram_id}")
