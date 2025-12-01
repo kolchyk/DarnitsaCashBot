@@ -76,6 +76,7 @@ def build_structured_payload(
         "line_items": [
             {
                 "name": item["name"],
+                "original_name": item.get("original_name", item["name"]),  # Оригинальный текст
                 "quantity": item["quantity"],
                 "price": item["price"],
                 "confidence": item["confidence"],
@@ -202,11 +203,13 @@ def _extract_purchase_ts(tokens_by_profile: dict[str, list[OcrToken]]):
 
 def _line_item_from_cluster(cluster: LineCluster, catalog_aliases: dict[str, list[str]]) -> dict[str, Any]:
     normalized_name = _normalize_text(cluster.text)
+    original_name = cluster.text  # Сохраняем оригинальный текст до нормализации
     quantity, price = _extract_quantity_and_price(normalized_name)
     sku_code, score = _match_sku(normalized_name, catalog_aliases)
 
     return {
         "name": normalized_name,
+        "original_name": original_name,  # Оригинальный текст для поиска кириллицы
         "quantity": quantity,
         "price": price,
         "confidence": cluster.confidence,

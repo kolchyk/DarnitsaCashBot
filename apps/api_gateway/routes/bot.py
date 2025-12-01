@@ -248,22 +248,45 @@ async def get_receipt_status(
     darnitsa_products: list[DarnitsaProduct] = []
     if receipt.status in ("processing", "accepted"):
         # Keywords for identifying Darnitsa products (same as in rules_engine)
-        DARNITSA_KEYWORDS = [
-            "дарниця", "дарница", "дарниці", "дарницю", "дарницею", "darnitsa",
+        DARNITSA_KEYWORDS_CYRILLIC = [
+            "дарниця", "дарница", "дарниці", "дарницю", "дарницею",
+        ]
+        DARNITSA_KEYWORDS_LATIN = [
+            "darnitsa", "darnitsia",  # транслитерация через unidecode
         ]
         
         line_items_stmt = select(LineItem).where(LineItem.receipt_id == receipt_id)
         line_items_result = await session.execute(line_items_stmt)
         line_items = line_items_result.scalars().all()
         
+        # Также проверяем OCR payload для оригинального текста
+        ocr_payload = receipt.ocr_payload
+        ocr_line_items = ocr_payload.get("line_items", []) if isinstance(ocr_payload, dict) else []
+        ocr_name_map = {item.get("name", ""): item.get("original_name", item.get("name", "")) 
+                        for item in ocr_line_items}
+        
         for item in line_items:
             name_lower = item.product_name.lower()
-            if any(keyword in name_lower for keyword in DARNITSA_KEYWORDS):
+            # Проверяем нормализованное имя (транслитерация)
+            found = any(keyword in name_lower for keyword in DARNITSA_KEYWORDS_LATIN)
+            
+            # Если не найдено, проверяем оригинальное имя из OCR payload
+            if not found and ocr_name_map:
+                original_name = ocr_name_map.get(item.product_name, "")
+                if original_name:
+                    original_lower = original_name.lower()
+                    found = any(keyword in original_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC)
+            
+            if found:
                 # Convert price from kopecks to UAH
                 price_uah = item.unit_price / 100.0
+                # Используем оригинальное название, если доступно, иначе нормализованное
+                display_name = ocr_name_map.get(item.product_name, item.product_name)
+                if not display_name or display_name == item.product_name:
+                    display_name = item.product_name
                 darnitsa_products.append(
                     DarnitsaProduct(
-                        name=item.product_name,
+                        name=display_name,
                         price=price_uah,
                         quantity=item.quantity,
                     )

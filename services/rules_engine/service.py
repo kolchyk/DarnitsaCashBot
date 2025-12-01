@@ -62,7 +62,7 @@ async def evaluate(payload: dict) -> None:
         # Проверяем наличие "Дарниця" в названиях товаров
         # Используем регистронезависимый поиск
         # Включаем разные падежи и варианты написания на украинском языке
-        DARNITSA_KEYWORDS = [
+        DARNITSA_KEYWORDS_CYRILLIC = [
             # Основные варианты (именительный падеж)
             "дарниця", "дарница",
             # Родительный падеж
@@ -71,18 +71,27 @@ async def evaluate(payload: dict) -> None:
             "дарницю",
             # Творительный падеж
             "дарницею",
-            # Латинские варианты
-            "darnitsa",
+        ]
+        DARNITSA_KEYWORDS_LATIN = [
+            # Латинские варианты (транслитерация через unidecode)
+            "darnitsa", "darnitsia",
         ]
         has_darnitsa = False
         
         # Сохраняем все распознанные товары и проверяем наличие Дарница
         for item in line_items:
-            name = item.get("name", "")
-            name_lower = name.lower()
+            # Используем оригинальный текст для поиска кириллицы
+            original_name = item.get("original_name", item.get("name", ""))
+            normalized_name = item.get("name", "")
             
-            # Проверяем наличие Дарница в названии товара (регистронезависимо)
-            if any(keyword in name_lower for keyword in DARNITSA_KEYWORDS):
+            original_lower = original_name.lower()
+            normalized_lower = normalized_name.lower()
+            
+            # Проверяем наличие Дарница в оригинальном тексте (кириллица)
+            if any(keyword in original_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC):
+                has_darnitsa = True
+            # Проверяем в нормализованном тексте (транслитерация)
+            elif any(keyword in normalized_lower for keyword in DARNITSA_KEYWORDS_LATIN):
                 has_darnitsa = True
             
             quantity = int(item.get("quantity", 1))

@@ -1,0 +1,230 @@
+{
+  "merchant": "CHEKI, VIDANI TRADITSIINIMI RRO EPRILIUDNIUIUT'SIA NE",
+  "purchase_ts": "2025-03-13T15:31:18+00:00",
+  "total": null,
+  "line_items": [
+    {
+      "name": "TOV \"APTEKA ZHI TRANSFARM\"",
+      "quantity": 1,
+      "price": null,
+      "confidence": 0.755,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "APTECHNII PUNKT",
+      "quantity": 1,
+      "price": null,
+      "confidence": 0.96,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "YINA, M.KIYIV PECHERS'KII R-N, BESSARABS'KA PLOSHCHA, BU;",
+      "quantity": 1,
+      "price": null,
+      "confidence": 0.88,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "ID 32799279",
+      "quantity": 1,
+      "price": 3279927900,
+      "confidence": 0.9450000000000001,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "PN 327992726597",
+      "quantity": 1,
+      "price": 32799272659700,
+      "confidence": 0.92,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "KASOVII CHEK",
+      "quantity": 1,
+      "price": null,
+      "confidence": 0.96,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "PRRO FN 40010877841 VN 797096",
+      "quantity": 1,
+      "price": 79709600,
+      "confidence": 0.75,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "CHEK FN TASOBORKHAM) VN 14 ONLAIN",
+      "quantity": 1,
+      "price": 1400,
+      "confidence": 0.7616666666666667,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "IU 13204 KAPTOPRES-DARNITSIA TABL. 25 MG IU20",
+      "quantity": 1,
+      "price": 2000,
+      "confidence": 0.8157142857142857,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "A KH 95.31 Z 95.",
+      "quantity": 1,
+      "price": 9500,
+      "confidence": 0.6980000000000001,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "DISKONT; 8.01",
+      "quantity": 1,
+      "price": 801,
+      "confidence": 0.8049999999999999,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "NT: 8.",
+      "quantity": 1,
+      "price": 800,
+      "confidence": 0.265,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": ", DO SPLATI: 95.:",
+      "quantity": 1,
+      "price": 9500,
+      "confidence": 0.8099999999999999,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "OTIVKOVA. BEZGOTIVKA: 95.:",
+      "quantity": 1,
+      "price": 9500,
+      "confidence": 0.5933333333333334,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "G 7.900565 6.",
+      "quantity": 1,
+      "price": 600,
+      "confidence": 0.6133333333333333,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "15265;UEG:3.0.1.10",
+      "quantity": 1,
+      "price": 110,
+      "confidence": 0.47,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": ", TOVAR SERTIFIKOVANO",
+      "quantity": 1,
+      "price": null,
+      "confidence": 0.9066666666666666,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "13-03-2025 15:31:18",
+      "quantity": 1,
+      "price": 1800,
+      "confidence": 0.8999999999999999,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "FISKAL'NII CHEK",
+      "quantity": 1,
+      "price": null,
+      "confidence": 0.96,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "FSKO EKP",
+      "quantity": 1,
+      "price": null,
+      "confidence": 0.835,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    },
+    {
+      "name": "DERZHAVNA PODATKOVA SLUZHBA UKRAYINI",
+      "quantity": 1,
+      "price": null,
+      "confidence": 0.7825,
+      "sku_code": null,
+      "sku_match_score": 0.0
+    }
+  ],
+  "confidence": {
+    "mean": 0.7802959183673469,
+    "min": 0.265,
+    "max": 0.96,
+    "token_count": 70,
+    "auto_accept_candidate": false
+  },
+  "preprocessing": {
+    "original_shape": {
+      "width": 589,
+      "height": 1280
+    },
+    "filters": [
+      "grayscale",
+      "clahe",
+      "bilateral_denoise",
+      "adaptive_threshold"
+    ],
+    "deskew_angle": 0.0,
+    "residual_skew": 0.0,
+    "crops": {
+      "full": {
+        "height": 1280,
+        "width": 589
+      },
+      "header": {
+        "height": 256,
+        "width": 589
+      },
+      "body": {
+        "height": 832,
+        "width": 589
+      },
+      "totals": {
+        "height": 192,
+        "width": 589
+      }
+    }
+  },
+  "tesseract_stats": {
+    "full": {
+      "token_count": 79,
+      "mean_confidence": 0.7978481012658227
+    },
+    "line_items": {
+      "token_count": 70,
+      "mean_confidence": 0.7854285714285713
+    },
+    "totals": {
+      "token_count": 0,
+      "mean_confidence": 0.0
+    }
+  },
+  "manual_review_required": true,
+  "anomalies": []
+}

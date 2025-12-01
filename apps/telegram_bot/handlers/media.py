@@ -65,31 +65,38 @@ async def check_ocr_status(telegram_id: int, receipt_id: str, receipt_client: Re
             
             if darnitsa_products and len(darnitsa_products) > 0:
                 # Build detailed message about found Darnitsa products
-                message_parts = ["✅ Чек успішно розпізнано!\n\n"]
-                message_parts.append("Знайдено препарат(и) Дарниця:\n")
+                message_parts = ["✅ Чек успішно оброблено!\n\n"]
+                message_parts.append("🎉 Знайдено препарат(и) Дарниця:\n\n")
                 
+                total_price = 0
                 for product in darnitsa_products:
                     product_name = product.get("name", "Невідомий препарат")
                     price = product.get("price", 0)
                     quantity = product.get("quantity", 1)
+                    total_price += price * quantity
                     
                     if quantity > 1:
-                        message_parts.append(f"• {product_name} (кількість: {quantity}, ціна: {price:.2f} грн)\n")
+                        message_parts.append(f"• {product_name}\n")
+                        message_parts.append(f"  Кількість: {quantity} шт.\n")
+                        message_parts.append(f"  Ціна: {price:.2f} грн за одиницю\n")
+                        message_parts.append(f"  Сума: {price * quantity:.2f} грн\n\n")
                     else:
-                        message_parts.append(f"• {product_name} (ціна: {price:.2f} грн)\n")
+                        message_parts.append(f"• {product_name}\n")
+                        message_parts.append(f"  Ціна: {price:.2f} грн\n\n")
                 
-                if len(darnitsa_products) == 1:
-                    message_parts.append("\n💰 Вам буде нараховано бонус за цей препарат!")
-                else:
-                    message_parts.append("\n💰 Вам буде нараховано бонус за знайдені препарати!")
-                message_parts.append("\n💳 Вам буде зараховано 1 грн на мобільний протягом години.")
+                message_parts.append("💰 Бонус буде нараховано!\n\n")
+                message_parts.append("💳 Вам буде зараховано 1 грн на мобільний телефон протягом години після підтвердження чека.\n")
+                message_parts.append("Бонус надійде на номер телефону, який ви вказали в профілі.\n\n")
+                message_parts.append("Дякуємо за вибір продукції Дарниця! 🙏")
                 
                 await bot.send_message(telegram_id, "".join(message_parts))
             else:
-                # Fallback message if products not found yet (shouldn't happen, but just in case)
+                # No Darnitsa products found - inform user
                 await bot.send_message(
                     telegram_id,
-                    "✅ Чек успішно розпізнано! Вам буде зараховано 1 грн на мобільний протягом години."
+                    "✅ Чек успішно розпізнано!\n\n"
+                    "ℹ️ У вашому чеку не знайдено препаратів Дарниця.\n"
+                    "Бонус нараховується тільки за покупку продукції Дарниця."
                 )
         # If OCR failed (rejected), offer manual input
         elif status == "rejected":

@@ -118,7 +118,7 @@ class AppSettings(BaseSettings):
     prometheus_dir: Path | None = Field(default=None, alias="PROMETHEUS_MULTIPROC_DIR")
     tesseract_cmd: str | None = Field(default=None, alias="TESSERACT_CMD")
     tessdata_dir: str | None = Field(default=None, alias="TESSDATA_DIR")
-    ocr_languages: str = Field(default="ukr+rus+eng", alias="OCR_LANGUAGES")
+    ocr_languages: str = Field(default="ukr", alias="OCR_LANGUAGES")
     ocr_auto_accept_threshold: float = Field(default=0.8, alias="OCR_AUTO_ACCEPT_THRESHOLD")
     ocr_manual_review_threshold: float = Field(default=0.4, alias="OCR_MANUAL_REVIEW_THRESHOLD")
     ocr_totals_tolerance_percent: float = Field(default=1.0, alias="OCR_TOTALS_TOLERANCE_PERCENT")
