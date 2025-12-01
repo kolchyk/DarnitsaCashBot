@@ -1,8 +1,9 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,24 +19,65 @@ class AppSettings(BaseSettings):
     telegram_webhook_url: str | None = Field(default=None, alias="TELEGRAM_WEBHOOK_URL")
     telegram_admin_ids: str = Field(default="", alias="TELEGRAM_ADMIN_IDS")
 
+    # Heroku DATABASE_URL support
+    _heroku_database_url: str | None = Field(default=None, alias="DATABASE_URL")
+    
     postgres_host: str = Field(default="localhost", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
     postgres_db: str = Field(default="darnitsa_cashbot", alias="POSTGRES_DB")
     postgres_user: str = Field(default="darnitsa", alias="POSTGRES_USER")
     postgres_password: str = Field(default="darnitsa", alias="POSTGRES_PASSWORD")
+    
+    @model_validator(mode="after")
+    def parse_heroku_database_url(self):
+        """Parse Heroku DATABASE_URL if provided."""
+        if self._heroku_database_url:
+            parsed = urlparse(self._heroku_database_url)
+            self.postgres_user = parsed.username or self.postgres_user
+            self.postgres_password = parsed.password or self.postgres_password
+            self.postgres_host = parsed.hostname or self.postgres_host
+            self.postgres_port = parsed.port or self.postgres_port
+            self.postgres_db = parsed.path.lstrip("/") if parsed.path else self.postgres_db
+        return self
 
     storage_endpoint: str = Field(default="http://localhost:9000", alias="STORAGE_ENDPOINT")
     storage_bucket: str = Field(default="receipts", alias="STORAGE_BUCKET")
     storage_access_key: str = Field(default="miniokey", alias="STORAGE_ACCESS_KEY")
     storage_secret_key: str = Field(default="miniopass", alias="STORAGE_SECRET_KEY")
 
+    # Heroku CLOUDAMQP_URL support
+    _heroku_cloudamqp_url: str | None = Field(default=None, alias="CLOUDAMQP_URL")
+    
     rabbitmq_host: str = Field(default="localhost", alias="RABBITMQ_HOST")
     rabbitmq_port: int = Field(default=5672, alias="RABBITMQ_PORT")
     rabbitmq_user: str = Field(default="guest", alias="RABBITMQ_DEFAULT_USER")
     rabbitmq_password: str = Field(default="guest", alias="RABBITMQ_DEFAULT_PASS")
+    
+    @model_validator(mode="after")
+    def parse_heroku_rabbitmq_url(self):
+        """Parse Heroku CLOUDAMQP_URL if provided."""
+        if self._heroku_cloudamqp_url:
+            parsed = urlparse(self._heroku_cloudamqp_url)
+            self.rabbitmq_host = parsed.hostname or self.rabbitmq_host
+            self.rabbitmq_port = parsed.port or self.rabbitmq_port
+            self.rabbitmq_user = parsed.username or self.rabbitmq_user
+            self.rabbitmq_password = parsed.password or self.rabbitmq_password
+        return self
 
+    # Heroku REDIS_URL support
+    _heroku_redis_url: str | None = Field(default=None, alias="REDIS_URL")
+    
     redis_host: str = Field(default="localhost", alias="REDIS_HOST")
     redis_port: int = Field(default=6379, alias="REDIS_PORT")
+    
+    @model_validator(mode="after")
+    def parse_heroku_redis_url(self):
+        """Parse Heroku REDIS_URL if provided."""
+        if self._heroku_redis_url:
+            parsed = urlparse(self._heroku_redis_url)
+            self.redis_host = parsed.hostname or self.redis_host
+            self.redis_port = parsed.port or self.redis_port
+        return self
 
     easypay_api_base: str = Field(default="http://localhost:8080", alias="EASYPAY_API_BASE")
     easypay_merchant_id: str = Field(default="merchant", alias="EASYPAY_MERCHANT_ID")
@@ -73,6 +115,11 @@ class AppSettings(BaseSettings):
 
     @property
     def database_url(self) -> str:
+        """Get database URL, preferring Heroku DATABASE_URL if available."""
+        if self._heroku_database_url:
+            # Convert postgres:// to postgresql+asyncpg:// for SQLAlchemy
+            db_url = self._heroku_database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+            return db_url
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"

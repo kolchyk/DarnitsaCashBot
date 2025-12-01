@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from unittest.mock import AsyncMock
 
 from libs.common.crypto import Encryptor
 from libs.common.portmone import PortmoneErrorDetail, PortmoneResponse, PortmoneResponseError
@@ -39,7 +40,7 @@ async def test_trigger_payout_happy_path(monkeypatch):
     monkeypatch.setattr(bonus_module, "_record_pending", fake_pending)
 
     client = SimpleNamespace(
-        call=pytest.AsyncMock(
+        call=AsyncMock(
             return_value=PortmoneResponse(
                 status="ok",
                 raw="<rsp></rsp>",
@@ -102,7 +103,7 @@ async def test_trigger_payout_handles_response_error(monkeypatch):
     async def failing_call(*_args, **_kwargs):
         raise response_error
 
-    client = SimpleNamespace(call=pytest.AsyncMock(side_effect=failing_call))
+    client = SimpleNamespace(call=AsyncMock(side_effect=failing_call))
     payload = {"status": "accepted", "receipt_id": str(context.receipt_id)}
 
     await bonus_module.trigger_payout(

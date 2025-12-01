@@ -42,8 +42,8 @@ This guide explains how to extend `DarnitsaCashBot` so it can create and manage 
 
 ## 3. Client Setup
 1. Install an HTTP client with solid TLS support, e.g. `pip install httpx`.
-2. Extend `libs/common/config.py` so the new secrets appear on `get_settings()`.
-3. Create a thin wrapper around PortmoneDirect:
+2. Extend `libs/common/config.py` so the new secrets appear on `get_settings()`. The repo already surfaces `PORTMONE_LOGIN`, `PORTMONE_PASSWORD`, `PORTMONE_CERT_PATH`, `PORTMONE_PAYEE_ID`, `PORTMONE_DEFAULT_CURRENCY`, and `PORTMONE_WEBHOOK_TOKEN` so they can be injected through `.env`/infra tooling.
+3. Create a thin wrapper around PortmoneDirect (see `libs/common/portmone.py` for the production implementation):
    ```python
    import httpx
 
@@ -70,8 +70,9 @@ This guide explains how to extend `DarnitsaCashBot` so it can create and manage 
            response.raise_for_status()
            return response.text
    ```
-4. Register a webhook in `apps/api_gateway/routes/bot.py` (or a dedicated blueprint) that receives PortmoneDirect status notifications and pushes them into `QueueNames.BONUS_EVENTS`.
-5. Normalize XML parsing inside a shared helper so workers can map `<rsp status>` and `<error>` payloads into domain enums.
+4. Register a webhook in `apps/api_gateway/routes/portmone.py` that receives PortmoneDirect status notifications and pushes them into `QueueNames.BONUS_EVENTS`.
+5. Normalize XML parsing inside a shared helper (`libs/common/xml_utils.py`) so workers can map `<rsp status>` and `<error>` payloads into domain enums.
+6. For local tests run `docker compose up portmone-mock` and set `PORTMONE_API_BASE=http://localhost:8082/api/directcash/`.
 
 ## 4. Receipt-Gated Flow
 1. Bonus worker consumes `receipt.accepted` events, ensures `Receipt.status == "accepted"`, decrypts the MSISDN, and gathers the `payeeId`/`contractNumber`.
@@ -88,7 +89,7 @@ This guide explains how to extend `DarnitsaCashBot` so it can create and manage 
    ```
 3. Persist the returned bill/transaction identifiers on `BonusTransaction` for idempotency and reconciliation.
 4. Publish `payout_initiated` analytics plus a bot placeholder (“Processing PortmoneDirect top-up…”).
-5. When PortmoneDirect posts a callback:
+5. When PortmoneDirect posts a callback (`POST /portmone/webhook`):
    - Validate the source IP/TLS fingerprint and signature (if enabled).
    - Parse `<rsp status>`; update `bonus.portmone_status` and `receipt.status`.
    - On `status="ok"` trigger the telecom top-up and emit `payout_success`.
@@ -106,8 +107,8 @@ This guide explains how to extend `DarnitsaCashBot` so it can create and manage 
 
 ## 6. Testing & Rollout
 - Use a sandbox (or mock) service to replay XML responses locally:
-  - `uvicorn services.portmone_mock.main:app --reload --port 8081`
-  - Point `PORTMONE_API_BASE=http://localhost:8081/api/directcash/`.
+  - `uvicorn services.portmone_mock.main:app --reload --port 8082`
+  - Point `PORTMONE_API_BASE=http://localhost:8082/api/directcash/`.
 - Add integration tests that:
   - Simulate `receipt.accepted` → assert exactly one `bills.create` call and ledger update.
   - Replay success/failure callbacks → verify `bonus.portmone_status`, telecom fan-out, and Telegram notifications.
@@ -115,6 +116,6 @@ This guide explains how to extend `DarnitsaCashBot` so it can create and manage 
 - Rollout checklist:
   - [ ] Credentials stored in the secret manager and rotated.
   - [ ] Workers use the shared Portmone client (no ad-hoc HTTP calls).
-  - [ ] Callback endpoint exposed over HTTPS with mutual TLS if required.
+  - [ ] Callback endpoint `/portmone/webhook` exposed over HTTPS with mutual TLS if required.
   - [ ] Observability dashboards updated with the new metrics/alerts.
   - [ ] Runbook documents retry policy and manual fallback procedure.

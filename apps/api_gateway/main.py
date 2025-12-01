@@ -5,7 +5,6 @@ import time
 import uuid
 
 from fastapi import FastAPI, Request, Response
-from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import Counter, Histogram, generate_latest
 from starlette.responses import PlainTextResponse
 
@@ -36,12 +35,6 @@ def create_app() -> FastAPI:
     app.include_router(build_router())
     if FastAPIInstrumentor and settings.otel_endpoint:
         FastAPIInstrumentor.instrument_app(app)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 
     @app.middleware("http")
     async def tracing_middleware(request: Request, call_next):
@@ -89,9 +82,12 @@ app = create_app()
 
 
 def run():
+    import os
     import uvicorn
 
-    uvicorn.run("apps.api_gateway.main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    reload = os.environ.get("APP_ENV", "local") == "local"
+    uvicorn.run("apps.api_gateway.main:app", host="0.0.0.0", port=port, reload=reload)
 
 
 if __name__ == "__main__":

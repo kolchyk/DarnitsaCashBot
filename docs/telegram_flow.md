@@ -69,8 +69,8 @@
 ## 5. Поток выплат и уведомлений
 
 1. `bonus_service` расшифровывает `User.phone_number` через `libs.common.crypto.Encryptor` и сохраняет сумму 1 UAH (код по умолчанию — `100`, при необходимости скорректируйте для представления копеек).
-2. Сервис вызывает EasyPay (или PortmoneDirect согласно `easy.md`). Для продакшена замените ручной вызов HTTPX на официальный клиент `easypay-api`, установите ссылки идемпотентности и соблюдайте политику повторов/отката (3 попытки с экспоненциальным ожиданием).
-3. Ответы обновляют `BonusTransaction.easypay_status` (`IN_PROGRESS` → `SUCCESS` / `FAILED`) и опционально `bonus.easypay_reference`.
+2. Сервис вызывает PortmoneDirect через `libs/common/portmone.py`, формируя `bills.create` только после `status=accepted`.
+3. Ответы обновляют `BonusTransaction.payout_status` (`IN_PROGRESS` → `SUCCESS` / `FAILED`) и фиксируют `bonus.portmone_bill_id` для сверок и коллбеков.
 4. События аналитики (`payout_success`, `payout_failure`) передаются через Redis (`libs/common/analytics.py`), обеспечивая метрики из `prd.md`.
 5. `bonus_event_listener` отправляет пользовательские подтверждения ("Пополнение на 1 UAH завершено" против "Платеж не удался, попробуйте снова"). Настройте тексты через `NotificationService`.
 
@@ -90,7 +90,7 @@
    - Сгенерируйте `ENCRYPTION_SECRET` (32 байта) для шифрования телефона.
    - Установите секреты JWT, если используются admin API.
 5. **Внешние сервисы**
-   - `EASYPAY_API_BASE`, `EASYPAY_MERCHANT_ID`, `EASYPAY_MERCHANT_SECRET` или эквиваленты Portmone из `easy.md`.
+   - `PORTMONE_API_BASE`, `PORTMONE_LOGIN`, `PORTMONE_PASSWORD`, `PORTMONE_PAYEE_ID`, `PORTMONE_CERT_PATH`, `PORTMONE_WEBHOOK_TOKEN`.
    - URL эндпоинта OCR + учетные данные (обновите `ocr_worker` для использования продакшен-хоста).
 6. **Порядок запуска**
    - Запустите зависимости (БД, хранилище, RabbitMQ, Redis) → запустите `apps/api_gateway` (FastAPI) → запустите фоновый слушатель и планировщики → запустите `services/ocr_worker`, `services/rules_engine`, `services/bonus_service` → наконец запустите `apps/telegram_bot`.
@@ -99,8 +99,8 @@
 
 ## 7. Мониторинг, оповещения и восстановление
 
-- **Метрики**: Отслеживайте `receipt_uploaded`, `receipt_accepted`, `receipt_rejected`, `payout_success`, `payout_failure`, частоту ошибок EasyPay, задержку/уверенность OCR и задержки очередей, как указано в `prd.md` и `OCR.md`.
-- **Логи**: Включите структурированное логирование через `configure_logging(settings.log_level)` везде; включайте `receipt_id`, `telegram_id` и ссылки на EasyPay в каждую запись лога для ускорения реагирования на инциденты.
+- **Метрики**: Отслеживайте `receipt_uploaded`, `receipt_accepted`, `receipt_rejected`, `payout_success`, `payout_failure`, частоту ошибок Portmone (`portmone_request_total`, `portmone_fail_total{code}`), задержку/уверенность OCR и задержки очередей, как указано в `prd.md` и `OCR.md`.
+- **Логи**: Включите структурированное логирование через `configure_logging(settings.log_level)` везде; включайте `receipt_id`, `telegram_id` и ссылки на Portmone (`bill_id`, `contractNumber`) в каждую запись лога для ускорения реагирования на инциденты.
 - **Предложения по оповещению**:
   - Частота сбоев OCR >5% за 5 минут.
   - Серия `status=fail` EasyPay/Portmone >3 или тишина webhook >30 секунд.
@@ -108,7 +108,7 @@
 - **Общие шаги восстановления**:
   - **Чек застрял в `processing`**: поставьте сообщение обратно в очередь `receipts.incoming` или повторно запустите OCR через ручной эндпоинт, как только логи подтвердят доступность хранилища.
   - **Ложные отрицания правил**: обновите алиасы каталога (`libs/data/models/catalog.py`) и повторно запустите `services/rules_engine` для затронутых чеков.
-  - **Сбои выплат**: проверьте `BonusTransaction.easypay_status`, повторите выплату с новым ключом идемпотентности и уведомите поддержку, если простой EasyPay превышает SLA.
+  - **Сбои выплат**: проверьте `BonusTransaction.payout_status` и `BonusTransaction.portmone_error_code`, повторите выплату при необходимости и уведомите поддержку, если простой Portmone превышает SLA.
   - **Задача напоминания**: `apps/api_gateway/background.py::reminder_job` — заглушка; расширьте ее для пинга пользователей, которые запустили `/start`, но не отправили чек в течение 24 часов, как требуется в `prd.md`.
 
 Держите этот документ обновленным всякий раз, когда изменяются обработчики, сервисы или внешние интеграции, чтобы команды операций, маркетинга и поддержки имели единый источник правды для опыта работы с ботом.

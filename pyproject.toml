@@ -55,7 +55,6 @@ fakeredis = "^2.23.0"
 [tool.poetry.scripts]
 telegram-bot = "apps.telegram_bot.main:run"
 api-gateway = "apps.api_gateway.main:run"
-admin-api = "apps.admin_api.main:run"
 bonus-service = "services.bonus_service.main:run_worker"
 ocr-worker = "services.ocr_worker.worker:run_worker"
 rules-engine = "services.rules_engine.service:run_worker"

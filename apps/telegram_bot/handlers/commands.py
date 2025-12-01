@@ -99,7 +99,7 @@ def onboarding_text(_, *, require_phone: bool, user_name: str = "") -> str:
         return _(
             "{greeting}\n\n"
             "Welcome to DarnitsaCashBot! 🎉\n\n"
-            "Share your phone number so we can send 1₴ EasyPay top-ups for each approved receipt. {consent}"
+            "Share your phone number so we can send 1₴ PortmoneDirect top-ups for each approved receipt. {consent}"
         ).format(greeting=greeting, consent=consent)
     return _(
         "{greeting}\n\n"
@@ -117,7 +117,7 @@ def contact_keyboard(_) -> ReplyKeyboardMarkup:
 
 def phone_prompt_text(_) -> str:
     return _(
-        "We need your verified phone number to trigger EasyPay payouts. Tap the button below to share it."
+        "We need your verified phone number to trigger PortmoneDirect payouts. Tap the button below to share it."
     )
 
 

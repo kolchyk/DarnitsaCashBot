@@ -128,21 +128,21 @@ Requirements below describe only what is necessary to ingest one receipt, judge 
 | User | telegram_id, phone_number, locale, consent_timestamp | Phone encrypted; one-to-many receipts. |
 | Receipt | receipt_id, user_id, upload_ts, purchase_ts, merchant, status, ocr_payload_ref | Stores link to image + OCR JSON. |
 | LineItem | receipt_id, sku_code, product_name, qty, price, confidence | Derived from OCR + catalog match. |
-| BonusTransaction | transaction_id, receipt_id, msisdn, amount, easypay_status, retries | Idempotency via receipt_id. |
+| BonusTransaction | transaction_id, receipt_id, msisdn, amount, payout_status, portmone_bill_id, error_code, retries | Idempotency via receipt_id. |
 | CatalogItem | sku_code, product_aliases, active_flag, last_updated | Managed by marketing/config service. |
 
 ## 11. Integrations
 Only the integrations that keep the MVP flow alive are mandatory:
 1. **Telegram Bot API** – Webhook-based bot hosted behind HTTPS with secret token validation.
 2. **OCR Provider** – Could be Google Vision, AWS Textract, or on-prem; must support Ukrainian language packs and returning confidence per word/line.
-3. **EasyPay API** – Need merchant contract, sandbox credentials, IP allow-list, and webhook endpoint for payment status.
+3. **PortmoneDirect API** – Need reseller credentials, TLS bundle, IP allow-list, and webhook endpoint for payment status.
 4. **Analytics/BI** – Optional during MVP; capture events so they can be replayed later, but skip full warehouse plumbing until the flow is validated.
 
 ## 12. Edge Cases & Error Handling
 - Blurry/partial receipts → bot requests re-upload with tips (good lighting, full receipt).
 - Multiple receipts in one photo → treat as single submission; future enhancement to detect and split.
 - Missing phone number consent → block payout until user shares contact.
-- EasyPay maintenance window → queue payouts and notify users of delay.
+- Portmone maintenance window → queue payouts and notify users of delay.
 - Duplicate receipts (same fiscal number) → auto reject with explanation.
 - Unsupported mobile operator → return error and request alternative number.
 - Fraud scenarios (manipulated images) → heuristic check (metadata, repeated totals) and manual review queue.
@@ -151,13 +151,13 @@ Only the integrations that keep the MVP flow alive are mandatory:
 Focus on capturing the right events and logs so the MVP flow can be audited; polished dashboards may arrive later, but the data must already exist.
 - Events: `receipt_uploaded`, `receipt_accepted`, `receipt_rejected`, `payout_success`, `payout_failure`.
 - Dashboards: daily funnels (uploads → accepted → paid), operator breakdown, SKU-level redemption.
-- Alerts: OCR failure rate >5%, EasyPay failures >2% for 5 minutes, queue backlog >100 receipts.
-- Log correlation IDs across bot, OCR, rule engine, and EasyPay calls.
+- Alerts: OCR failure rate >5%, Portmone failures >2% for 5 minutes, queue backlog >100 receipts.
+- Log correlation IDs across bot, OCR, rule engine, and Portmone calls.
 
 ## 14. Rollout Plan & Dependencies
 Every phase below should exit only after we can demonstrate the linear receipt→OCR→rules→EasyPay flow operating in that environment; extra capabilities can trail behind.
-1. **Week 1-2**: Finalize legal/privacy text, EasyPay contract, select OCR vendor, build Telegram bot skeleton.
-2. **Week 3-4**: Implement OCR pipeline, rules engine, EasyPay integration (sandbox), internal admin views.
+1. **Week 1-2**: Finalize legal/privacy text, Portmone contract, select OCR vendor, build Telegram bot skeleton.
+2. **Week 3-4**: Implement OCR pipeline, rules engine, Portmone integration (sandbox), internal admin views.
 3. **Week 5**: Prioritize end-to-end smoke and regression tests with sample receipts; run lightweight load tests only to the extent they protect the MVP flow, plus fraud rule tuning.
 4. **Week 6**: Pilot launch with limited audience (1000 users), monitor, then nationwide release.
 5. **Dependencies**: Darnitsa SKU catalog, EasyPay credentials, secure hosting, marketing comms plan.
