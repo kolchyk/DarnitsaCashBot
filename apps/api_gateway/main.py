@@ -194,7 +194,8 @@ def run():
     port = int(os.environ.get("PORT", 8000))
     app_env = os.environ.get("APP_ENV", "").lower()
     reload = app_env == "local"
-    target_app = "apps.api_gateway.main:app" if reload else app
+    # Always use import string format - required for workers/reload mode
+    target_app = "apps.api_gateway.main:app"
     uvicorn.run(target_app, host="0.0.0.0", port=port, reload=reload)
 
 
