@@ -18,19 +18,14 @@ def create_redis_client(
     Args:
         redis_url: Redis connection URL
         decode_responses: Whether to decode responses as strings
-        settings: Optional settings object to check for Heroku Redis URL
+        settings: Optional settings object (unused, kept for compatibility)
         
     Returns:
         Configured Redis client
     """
-    # Detect Heroku Redis by checking settings or URL scheme
-    is_heroku_redis = False
-    if settings and hasattr(settings, "_heroku_redis_url") and settings._heroku_redis_url:
-        is_heroku_redis = True
-    else:
-        parsed = urlparse(redis_url)
-        # Heroku Redis URLs use rediss:// scheme (SSL)
-        is_heroku_redis = parsed.scheme == "rediss"
+    # Detect Heroku Redis by URL scheme (rediss:// uses SSL)
+    parsed = urlparse(redis_url)
+    is_heroku_redis = parsed.scheme == "rediss"
     
     if is_heroku_redis:
         # Heroku Redis uses SSL with self-signed certificates

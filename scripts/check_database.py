@@ -31,7 +31,8 @@ async def check_database():
         print(f"  Port: {settings.postgres_port}")
         print(f"  Database: {settings.postgres_db}")
         print(f"  User: {settings.postgres_user}")
-        print(f"  Using Heroku DATABASE_URL: {settings._heroku_database_url is not None}")
+        import os
+        print(f"  Using Heroku DATABASE_URL: {os.getenv('DATABASE_URL') is not None}")
         
         # Create engine
         print("\n🔌 Connecting to database...")

@@ -11,8 +11,7 @@ from aiogram.enums import ParseMode
 
 from libs.common import configure_logging, get_settings
 
-from .config import BotConfig
-from .handlers import build_router
+from .handlers import router as handlers_router
 from .middlewares import DependencyMiddleware
 from .services import ReceiptApiClient
 
@@ -22,9 +21,8 @@ logger = logging.getLogger(__name__)
 async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
-    config = BotConfig.from_settings(settings)
     
-    logger.info(f"Starting bot with token: {config.token[:10]}...")
+    logger.info(f"Starting bot with token: {settings.telegram_bot_token[:10]}...")
     logger.info(f"API Gateway URL: {settings.api_gateway_url}")
     
     # Warn if using default localhost URL in production
@@ -34,11 +32,11 @@ async def main() -> None:
             "This will not work in production. Please set API_GATEWAY_URL to your Heroku app URL."
         )
     
-    bot = Bot(token=config.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    bot = Bot(token=settings.telegram_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
     receipt_client = ReceiptApiClient(base_url=settings.api_gateway_url)
 
-    dp.include_router(build_router())
+    dp.include_router(handlers_router)
     dp.message.middleware(DependencyMiddleware(receipt_client=receipt_client))
 
     async def shutdown() -> None:

@@ -2,13 +2,9 @@ from aiogram import Router
 
 from . import commands, media
 
+router = Router()
+router.include_router(commands.router)
+router.include_router(media.router)
 
-def build_router() -> Router:
-    router = Router()
-    router.include_router(commands.router)
-    router.include_router(media.router)
-    return router
-
-
-__all__ = ["build_router"]
+__all__ = ["router"]
 

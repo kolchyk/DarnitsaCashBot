@@ -47,54 +47,19 @@ async def user_registration_error_handler(request: Request, exc: UserRegistratio
 
 async def database_error_handler(request: Request, exc: SQLAlchemyError) -> JSONResponse:
     """Handle database errors."""
-    error_msg = str(exc)
-    error_type = type(exc).__name__
+    logger.error(f"Database error: {type(exc).__name__}: {str(exc)}", exc_info=True)
     
-    logger.error(
-        f"Database error: error_type={error_type}, error={error_msg}",
-        exc_info=True,
-    )
-    
-    # Determine error type and appropriate response
+    # Handle integrity constraint violations (unique, foreign key, etc.)
     if isinstance(exc, IntegrityError):
-        # Check if it's a unique constraint violation
-        if "unique" in error_msg.lower() or "duplicate" in error_msg.lower():
-            # Extract telegram_id from request if possible
-            try:
-                payload = await request.json()
-                telegram_id = payload.get("telegram_id")
-                if telegram_id:
-                    raise UserAlreadyExistsError(telegram_id)
-            except Exception:
-                pass
-            return JSONResponse(
-                status_code=status.HTTP_409_CONFLICT,
-                content={"detail": "Resource already exists"},
-            )
         return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_409_CONFLICT,
             content={"detail": "Database constraint violation"},
         )
     
-    # Check for connection errors
-    if "connection" in error_msg.lower() or "connect" in error_msg.lower():
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"detail": "Database connection issue"},
-        )
-    
-    # Check for schema errors
-    if "relation" in error_msg.lower() or "table" in error_msg.lower() or "does not exist" in error_msg.lower():
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": "Table or relation does not exist (migrations may be needed)"},
-        )
-    
     # Generic database error
-    detail_msg = f"Database error occurred: {error_type}"
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": detail_msg},
+        content={"detail": "Database error occurred"},
     )
 
 

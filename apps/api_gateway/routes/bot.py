@@ -7,8 +7,9 @@ from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from uuid import UUID
 
 from libs.common.analytics import AnalyticsClient
@@ -23,12 +24,14 @@ from libs.common.storage import StorageClient
 from libs.data.models import LineItem, Receipt
 from libs.data.repositories import ReceiptRepository, UserRepository
 
+from ..exceptions import EncryptionError
 from ..dependencies import (
     get_analytics,
     get_receipt_rate_limiter,
     get_session_dep,
     get_storage_client,
 )
+from ..exceptions import UserAlreadyExistsError
 from ..schemas import (
     DarnitsaProduct,
     ManualReceiptDataRequest,
@@ -188,6 +191,12 @@ async def upsert_user(
             locale=user.locale,
             has_phone=bool(user.phone_number),
         )
+    except IntegrityError as e:
+        await session.rollback()
+        # Check if it's a unique constraint violation on telegram_id
+        if "telegram_id" in str(e).lower() or "unique" in str(e).lower():
+            raise UserAlreadyExistsError(payload.telegram_id) from e
+        raise
     except ValueError as e:
         # Encryption/decryption errors raise ValueError
         await session.rollback()
@@ -196,11 +205,6 @@ async def upsert_user(
             exc_info=True,
         )
         raise EncryptionError(f"Encryption error: {str(e)}", payload.telegram_id) from e
-    except Exception as e:
-        # Let SQLAlchemy errors be handled by the exception handler
-        await session.rollback()
-        # Re-raise to let exception handlers process it
-        raise
 
 
 @router.post("/receipts", response_model=ReceiptUploadResponse)

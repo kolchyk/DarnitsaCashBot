@@ -2,8 +2,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
+import os
 
-from pydantic import Field, PrivateAttr, field_validator, model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,18 +12,6 @@ class AppSettings(BaseSettings):
     """Centralised configuration loaded from environment variables."""
 
     model_config = SettingsConfigDict(env_file=("env.example", ".env"), env_file_encoding="utf-8", extra="ignore")
-    
-    @model_validator(mode="before")
-    @classmethod
-    def read_heroku_urls(cls, values: dict) -> dict:
-        """Read Heroku URLs from environment before validation."""
-        import os
-        if isinstance(values, dict):
-            if "DATABASE_URL" not in values:
-                values["DATABASE_URL"] = os.getenv("DATABASE_URL")
-            if "REDIS_URL" not in values:
-                values["REDIS_URL"] = os.getenv("REDIS_URL")
-        return values
 
     app_env: Literal["local", "dev", "prod"] = "local"
     log_level: str = "INFO"
@@ -32,9 +21,6 @@ class AppSettings(BaseSettings):
     telegram_admin_ids: str = Field(default="", alias="TELEGRAM_ADMIN_IDS")
     api_gateway_url: str = Field(default="http://localhost:8000", alias="API_GATEWAY_URL")
 
-    # Heroku DATABASE_URL support (internal, not exposed as field)
-    _heroku_database_url: str | None = PrivateAttr(default=None)
-    
     postgres_host: str = Field(default="localhost", alias="POSTGRES_HOST")
     postgres_port: int = Field(default=5432, alias="POSTGRES_PORT")
     postgres_db: str = Field(default="darnitsa_cashbot", alias="POSTGRES_DB")
@@ -43,18 +29,26 @@ class AppSettings(BaseSettings):
     postgres_ssl_mode: str = Field(default="prefer", alias="POSTGRES_SSL_MODE")
     
     @model_validator(mode="after")
-    def parse_heroku_database_url(self):
-        """Parse Heroku DATABASE_URL if provided."""
-        import os
-        db_url = os.getenv("DATABASE_URL") or self._heroku_database_url
+    def parse_heroku_urls(self):
+        """Parse Heroku DATABASE_URL and REDIS_URL if provided."""
+        # Parse DATABASE_URL
+        db_url = os.getenv("DATABASE_URL")
         if db_url:
-            self._heroku_database_url = db_url
             parsed = urlparse(db_url)
             self.postgres_user = parsed.username or self.postgres_user
             self.postgres_password = parsed.password or self.postgres_password
             self.postgres_host = parsed.hostname or self.postgres_host
             self.postgres_port = parsed.port or self.postgres_port
             self.postgres_db = parsed.path.lstrip("/") if parsed.path else self.postgres_db
+        
+        # Parse REDIS_URL
+        redis_url = os.getenv("REDIS_URL")
+        if redis_url:
+            parsed = urlparse(redis_url)
+            self.redis_host = parsed.hostname or self.redis_host
+            self.redis_port = parsed.port or self.redis_port
+            self.redis_password = parsed.password or self.redis_password
+        
         return self
 
     storage_endpoint: str | None = Field(default=None, alias="STORAGE_ENDPOINT")
@@ -63,33 +57,13 @@ class AppSettings(BaseSettings):
     storage_secret_key: str = Field(default="miniopass", alias="STORAGE_SECRET_KEY")
     storage_region: str = Field(default="us-east-1", alias="STORAGE_REGION")
 
-    # Heroku REDIS_URL support
-    redis_url_env: str | None = Field(default=None, alias="REDIS_URL", exclude=True)
-    _heroku_redis_url: str | None = PrivateAttr(default=None)
-    
     redis_host: str = Field(default="localhost", alias="REDIS_HOST")
     redis_port: int = Field(default=6379, alias="REDIS_PORT")
     redis_password: str | None = Field(default=None, alias="REDIS_PASSWORD")
     
-    @model_validator(mode="after")
-    def parse_heroku_redis_url(self):
-        """Parse Heroku REDIS_URL if provided."""
-        import os
-        redis_url = self.redis_url_env or os.getenv("REDIS_URL") or self._heroku_redis_url
-        if redis_url:
-            self._heroku_redis_url = redis_url
-            parsed = urlparse(redis_url)
-            self.redis_host = parsed.hostname or self.redis_host
-            self.redis_port = parsed.port or self.redis_port
-            self.redis_password = parsed.password or self.redis_password
-        return self
-    
     @property
     def redis_url(self) -> str:
-        """Get Redis URL, preferring Heroku REDIS_URL if available."""
-        if self._heroku_redis_url:
-            return self._heroku_redis_url
-        # Build URL from components
+        """Get Redis URL from components."""
         if self.redis_password:
             return f"redis://:{self.redis_password}@{self.redis_host}:{self.redis_port}"
         return f"redis://{self.redis_host}:{self.redis_port}"
@@ -131,10 +105,12 @@ class AppSettings(BaseSettings):
     @property
     def database_url(self) -> str:
         """Get database URL, preferring Heroku DATABASE_URL if available."""
-        if self._heroku_database_url:
+        # Check if DATABASE_URL is set in environment (Heroku)
+        db_url = os.getenv("DATABASE_URL")
+        if db_url:
             # Convert postgres:// to postgresql+asyncpg:// for SQLAlchemy
-            db_url = self._heroku_database_url.replace("postgres://", "postgresql+asyncpg://", 1)
-            return db_url
+            return db_url.replace("postgres://", "postgresql+asyncpg://", 1)
+        # Build URL from components
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import AsyncIterator
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -17,7 +18,7 @@ def _init_engine():
         settings = get_settings()
         # Add SSL parameters for Heroku Postgres
         connect_args = {}
-        if settings._heroku_database_url:
+        if os.getenv("DATABASE_URL"):
             import ssl
             
             # Determine SSL mode based on environment and configuration
