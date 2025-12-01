@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ssl
 from urllib.parse import urlparse
 
 import redis.asyncio as redis
@@ -35,12 +34,12 @@ def create_redis_client(
     
     if is_heroku_redis:
         # Heroku Redis uses SSL with self-signed certificates
-        # For redis-py 5.x, use ssl_cert_reqs instead of ssl parameter
+        # For redis-py 7.x, use ssl_cert_reqs as string "none" instead of ssl.CERT_NONE
         # The rediss:// scheme automatically enables SSL
         return redis.from_url(
             redis_url,
             decode_responses=decode_responses,
-            ssl_cert_reqs=ssl.CERT_NONE,
+            ssl_cert_reqs="none",
         )
     
     return redis.from_url(redis_url, decode_responses=decode_responses)
