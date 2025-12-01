@@ -61,7 +61,8 @@ class AppSettings(BaseSettings):
     storage_access_key: str = Field(default="miniokey", alias="STORAGE_ACCESS_KEY")
     storage_secret_key: str = Field(default="miniopass", alias="STORAGE_SECRET_KEY")
 
-    # Heroku REDIS_URL support (internal, not exposed as field)
+    # Heroku REDIS_URL support
+    redis_url_env: str | None = Field(default=None, alias="REDIS_URL", exclude=True)
     _heroku_redis_url: str | None = PrivateAttr(default=None)
     
     redis_host: str = Field(default="localhost", alias="REDIS_HOST")
@@ -72,7 +73,7 @@ class AppSettings(BaseSettings):
     def parse_heroku_redis_url(self):
         """Parse Heroku REDIS_URL if provided."""
         import os
-        redis_url = os.getenv("REDIS_URL") or self._heroku_redis_url
+        redis_url = self.redis_url_env or os.getenv("REDIS_URL") or self._heroku_redis_url
         if redis_url:
             self._heroku_redis_url = redis_url
             parsed = urlparse(redis_url)
