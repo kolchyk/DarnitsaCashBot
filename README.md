@@ -127,10 +127,42 @@ docker compose up ocr-worker
 heroku create your-app-name
 heroku addons:create heroku-postgresql:mini
 heroku addons:create heroku-redis:mini
+
+# Налаштування buildpack для встановлення системних залежностей (Tesseract OCR)
+# Файл .buildpacks вже містить необхідні buildpack, але якщо потрібно налаштувати вручну:
+heroku buildpacks:set https://github.com/heroku/heroku-buildpack-apt.git --index 1
+heroku buildpacks:set heroku/python --index 2
+
 heroku config:set TELEGRAM_BOT_TOKEN=your_token ENCRYPTION_SECRET=your_secret
 git push heroku main
 heroku run alembic upgrade head
 heroku ps:scale web=1 worker=1
+```
+
+**Важливо**: Проект використовує `Aptfile` для встановлення Tesseract OCR та інших системних залежностей. Файл `.buildpacks` автоматично налаштовує необхідний buildpack. Якщо після деплою виникає помилка `TesseractNotFoundError`, переконайтеся, що buildpack встановлено правильно:
+
+```bash
+heroku buildpacks --app your-app-name
+```
+
+Має бути:
+
+1. `heroku-buildpack-apt` (для встановлення пакетів з Aptfile)
+2. `heroku/python` (для Python залежностей)
+
+### Налаштування Tesseract на Heroku
+
+Якщо після деплою виникає помилка `TesseractNotFoundError`, код автоматично намагається знайти tesseract у стандартних місцях встановлення (`/usr/bin/tesseract`, `/usr/local/bin/tesseract`). Для явного вказання шляху до tesseract (рекомендовано для Heroku), встановіть змінну середовища:
+
+```bash
+heroku config:set TESSERACT_CMD=/usr/bin/tesseract
+```
+
+Перевірка встановлення tesseract:
+
+```bash
+heroku run tesseract --version
+heroku run python -c "import pytesseract; print(pytesseract.get_tesseract_version())"
 ```
 
 ## Доступні сервіси

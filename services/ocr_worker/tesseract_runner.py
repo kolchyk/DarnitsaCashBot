@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
 from dataclasses import dataclass, field
 import os
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -53,6 +55,12 @@ class TesseractRunner:
         self.settings = settings
         if settings.tesseract_cmd:
             pytesseract.pytesseract.tesseract_cmd = settings.tesseract_cmd
+        else:
+            # Auto-detect tesseract if not explicitly configured
+            detected_path = self._find_tesseract()
+            if detected_path:
+                pytesseract.pytesseract.tesseract_cmd = detected_path
+                LOGGER.info("Auto-detected tesseract at %s", detected_path)
         if settings.tessdata_dir:
             os.environ["TESSDATA_PREFIX"] = settings.tessdata_dir
         self.languages = settings.ocr_languages
@@ -61,6 +69,28 @@ class TesseractRunner:
             "line_items": TesseractProfile(name="line_items", psm=6),
             "totals": TesseractProfile(name="totals", psm=7, whitelist="0123456789₴грн., "),
         }
+
+    @staticmethod
+    def _find_tesseract() -> str | None:
+        """Find tesseract binary in common installation locations."""
+        # First, try using shutil.which which checks PATH
+        tesseract_path = shutil.which("tesseract")
+        if tesseract_path:
+            return tesseract_path
+        
+        # Common installation paths (especially for Heroku/apt buildpack)
+        common_paths = [
+            "/usr/bin/tesseract",
+            "/usr/local/bin/tesseract",
+            "/opt/homebrew/bin/tesseract",  # macOS Apple Silicon
+            "/usr/local/opt/tesseract/bin/tesseract",  # macOS Homebrew
+        ]
+        
+        for path in common_paths:
+            if Path(path).exists() and os.access(path, os.X_OK):
+                return path
+        
+        return None
 
     def run(self, preprocess_result: PreprocessResult) -> TesseractResult:
         base_image = Image.fromarray(preprocess_result.processed_image)
