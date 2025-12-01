@@ -50,6 +50,8 @@ heroku config:set ENCRYPTION_SECRET=your_32_byte_secret
 # Telegram настройки
 heroku config:set TELEGRAM_ADMIN_IDS=123456789,987654321
 heroku config:set TELEGRAM_WEBHOOK_URL=https://your-app-name.herokuapp.com/webhook
+# URL API Gateway (используется ботом для подключения к API)
+heroku config:set API_GATEWAY_URL=https://your-app-name.herokuapp.com
 
 # Хранилище (S3)
 heroku config:set STORAGE_ENDPOINT=https://s3.amazonaws.com
@@ -120,8 +122,29 @@ heroku ps
 
 ### Просмотр логов
 
+**Все логи (web + worker):**
 ```bash
 heroku logs --tail
+```
+
+**Только логи Telegram бота (worker):**
+```bash
+heroku logs --tail --ps worker
+```
+
+**Только логи API Gateway (web):**
+```bash
+heroku logs --tail --ps web
+```
+
+**Последние N строк:**
+```bash
+heroku logs --tail -n 100
+```
+
+**Поиск ошибок в логах:**
+```bash
+heroku logs --tail | grep -i error
 ```
 
 ## Структура процессов
@@ -195,6 +218,36 @@ heroku config:get CLOUDAMQP_URL
 
 ```bash
 heroku logs --tail --source app
+```
+
+### Проверка работы Telegram бота
+
+**1. Убедитесь, что worker запущен:**
+```bash
+heroku ps
+```
+Должен быть активен процесс `worker.1`.
+
+**2. Если worker не запущен:**
+```bash
+heroku ps:scale worker=1
+```
+
+**3. Проверьте логи бота при отправке команды /start:**
+```bash
+heroku logs --tail --ps worker
+```
+Отправьте команду `/start` боту и проверьте логи на наличие ошибок.
+
+**4. Проверьте переменные окружения бота:**
+```bash
+heroku config:get TELEGRAM_BOT_TOKEN
+heroku config:get API_GATEWAY_URL
+```
+
+**5. Перезапустите worker при необходимости:**
+```bash
+heroku ps:restart worker
 ```
 
 ### Запуск консоли

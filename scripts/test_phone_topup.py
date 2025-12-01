@@ -38,7 +38,7 @@ def normalize_phone(phone: str) -> str:
     return digits
 
 
-async def topup_phone(phone: str, amount: float = 1.00):
+async def topup_phone(phone: str, amount: float = 1.00, payee_id: str | None = None):
     """Пополняет баланс телефона через Portmone API."""
     settings = get_settings()
     
@@ -53,15 +53,6 @@ async def topup_phone(phone: str, amount: float = 1.00):
     print(f"Нормализованный номер: {normalized_phone}")
     print()
     
-    # Проверяем конфигурацию
-    print("Конфигурация:")
-    print(f"  API Base URL: {settings.portmone_api_base}")
-    print(f"  Login: {settings.portmone_login}")
-    print(f"  Version: {settings.portmone_version}")
-    print(f"  Payee ID: {settings.portmone_payee_id}")
-    print(f"  Currency: {settings.portmone_default_currency}")
-    print()
-    
     # Определяем оператора по префиксу
     prefix = normalized_phone[3:5]  # Первые 2 цифры после 380
     operator = "Неизвестный"
@@ -72,13 +63,32 @@ async def topup_phone(phone: str, amount: float = 1.00):
     elif prefix in ['63', '73', '93']:
         operator = "lifecell"
     
-    print(f"Оператор: {operator} (префикс {prefix})")
-    print(f"⚠️  Убедитесь, что PORTMONE_PAYEE_ID соответствует оператору {operator}")
+    # Используем переданный payee_id или из настроек
+    payee_id_to_use = payee_id or settings.portmone_payee_id
+    
+    # Проверяем конфигурацию
+    print("Конфигурация:")
+    print(f"  API Base URL: {settings.portmone_api_base}")
+    print(f"  Login: {settings.portmone_login}")
+    print(f"  Version: {settings.portmone_version}")
+    print(f"  Payee ID: {payee_id_to_use}")
+    print(f"  Currency: {settings.portmone_default_currency}")
     print()
+    
+    print(f"Оператор: {operator} (префикс {prefix})")
+    if payee_id_to_use == "your_payee_id_here" or payee_id_to_use == "100000":
+        print(f"⚠️  ВНИМАНИЕ: PORTMONE_PAYEE_ID не установлен или использует значение по умолчанию!")
+        print(f"   Для оператора {operator} нужен правильный payeeId от менеджера Portmone")
+        print()
+        use_anyway = input("Продолжить с текущим payeeId? (yes/no): ").strip().lower()
+        if use_anyway != 'yes':
+            print("Отменено пользователем")
+            return False
+        print()
     
     # Формируем payload для bills.create
     payload = {
-        "payeeId": settings.portmone_payee_id,
+        "payeeId": payee_id_to_use,
         "contractNumber": normalized_phone,
         "amount": f"{amount:.2f}",
         "currency": settings.portmone_default_currency,
@@ -172,14 +182,26 @@ async def topup_phone(phone: str, amount: float = 1.00):
 
 def main():
     """Главная функция."""
-    phone = "0992227160"
-    amount = 1.00
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Тест пополнения телефона через Portmone')
+    parser.add_argument('--phone', default='0992227160', help='Номер телефона (по умолчанию: 0992227160)')
+    parser.add_argument('--amount', type=float, default=1.00, help='Сумма пополнения в грн (по умолчанию: 1.00)')
+    parser.add_argument('--payee-id', help='ID оператора (payeeId). Если не указан, используется из настроек')
+    
+    args = parser.parse_args()
+    
+    phone = args.phone
+    amount = args.amount
+    payee_id = args.payee_id
     
     print()
     print(f"Тест пополнения телефона {phone} на {amount} грн")
+    if payee_id:
+        print(f"Используется payeeId: {payee_id}")
     print()
     
-    success = asyncio.run(topup_phone(phone, amount))
+    success = asyncio.run(topup_phone(phone, amount, payee_id))
     
     print()
     print("=" * 60)
