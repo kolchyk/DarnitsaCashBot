@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from .models import BonusTransaction, CatalogItem, LineItem, Receipt, User
 from libs.common.crypto import Encryptor
@@ -83,6 +84,7 @@ class ReceiptRepository:
     async def history_for_user(self, user_id: UUID, limit: int = 5) -> Sequence[Receipt]:
         stmt = (
             select(Receipt)
+            .options(selectinload(Receipt.bonus_transaction))
             .where(Receipt.user_id == user_id)
             .order_by(Receipt.upload_ts.desc())
             .limit(limit)
