@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
@@ -8,6 +10,8 @@ from libs.common.i18n import get_translator
 
 from ..services import ReceiptApiClient
 
+logger = logging.getLogger(__name__)
+
 router = Router(name="commands")
 
 
@@ -15,18 +19,31 @@ router = Router(name="commands")
 async def cmd_start(message: Message, receipt_client: ReceiptApiClient):
     locale = get_locale(message)
     _ = get_translator(locale)
-    user_info = await receipt_client.register_user(
-        telegram_id=message.from_user.id,
-        phone_number=message.contact.phone_number if message.contact else None,
-        locale=locale,
-    )
-    has_phone = bool(user_info.get("has_phone"))
-    reply_markup = contact_keyboard(_) if not has_phone else ReplyKeyboardRemove()
-    user_name = message.from_user.first_name or ""
-    await message.answer(
-        onboarding_text(_, require_phone=not has_phone, user_name=user_name),
-        reply_markup=reply_markup,
-    )
+    phone_number = None
+    if message.contact and hasattr(message.contact, 'phone_number'):
+        phone_number = message.contact.phone_number
+    
+    try:
+        user_info = await receipt_client.register_user(
+            telegram_id=message.from_user.id,
+            phone_number=phone_number,
+            locale=locale,
+        )
+        has_phone = bool(user_info.get("has_phone"))
+        reply_markup = contact_keyboard(_) if not has_phone else ReplyKeyboardRemove()
+        user_name = message.from_user.first_name or ""
+        await message.answer(
+            onboarding_text(_, require_phone=not has_phone, user_name=user_name),
+            reply_markup=reply_markup,
+        )
+    except Exception as e:
+        logger.error(f"Error in /start command: {e}", exc_info=True)
+        user_name = message.from_user.first_name or ""
+        greeting = _("Hello, {name}! 👋").format(name=user_name) if user_name else _("Hello! 👋")
+        await message.answer(
+            f"{greeting}\n\n"
+            + _("Sorry, there was an error connecting to the server. Please try again later.")
+        )
 
 
 @router.message(Command("help"))
@@ -68,7 +85,8 @@ async def cmd_history(message: Message, receipt_client: ReceiptApiClient):
 
 @router.message(Command("change_phone"))
 async def cmd_change_phone(message: Message):
-    _ = get_translator(get_locale(message))
+    locale = get_locale(message)
+    _ = get_translator(locale)
     await message.answer(phone_prompt_text(_), reply_markup=contact_keyboard(_))
 
 

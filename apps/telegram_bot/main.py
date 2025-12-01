@@ -20,7 +20,7 @@ async def main() -> None:
     config = BotConfig.from_settings(settings)
     bot = Bot(token=config.token, parse_mode=ParseMode.HTML)
     dp = Dispatcher()
-    receipt_client = ReceiptApiClient()
+    receipt_client = ReceiptApiClient(base_url=settings.api_gateway_url)
 
     dp.include_router(build_router())
     dp.message.middleware(DependencyMiddleware(receipt_client=receipt_client))

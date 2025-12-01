@@ -32,6 +32,7 @@ class AppSettings(BaseSettings):
     telegram_bot_token: str = Field(..., alias="TELEGRAM_BOT_TOKEN")
     telegram_webhook_url: str | None = Field(default=None, alias="TELEGRAM_WEBHOOK_URL")
     telegram_admin_ids: str = Field(default="", alias="TELEGRAM_ADMIN_IDS")
+    api_gateway_url: str = Field(default="http://localhost:8000", alias="API_GATEWAY_URL")
 
     # Heroku DATABASE_URL support (internal, not exposed as field)
     _heroku_database_url: str | None = PrivateAttr(default=None)
