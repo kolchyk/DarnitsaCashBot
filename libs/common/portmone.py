@@ -15,29 +15,45 @@ from libs.common.xml_utils import XMLParseError, flatten_xml, parse_xml_document
 # Prometheus metrics - created once, reused if module reloads
 def _get_or_create_counter(name, documentation, labelnames):
     """Get existing Counter from registry or create a new one."""
+    # Check if metric already exists in registry
+    for collector in list(REGISTRY._collector_to_names.keys()):
+        if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Counter):
+            # Verify labelnames match
+            if hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames):
+                return collector
+    # Metric doesn't exist, create it
     try:
         return Counter(name, documentation, labelnames)
     except ValueError:
-        # Metric already exists, find and return it
-        # Search through all collectors to find the one with matching name
+        # Race condition: metric was created between check and creation
+        # Find and return the existing one
         for collector in list(REGISTRY._collector_to_names.keys()):
             if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Counter):
-                return collector
-        # If not found, raise the original error
+                if hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames):
+                    return collector
         raise
 
 
 def _get_or_create_histogram(name, documentation, labelnames, buckets):
     """Get existing Histogram from registry or create a new one."""
+    # Check if metric already exists in registry
+    for collector in list(REGISTRY._collector_to_names.keys()):
+        if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Histogram):
+            # Verify labelnames and buckets match
+            if (hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames) and
+                hasattr(collector, '_buckets') and collector._buckets == buckets):
+                return collector
+    # Metric doesn't exist, create it
     try:
         return Histogram(name, documentation, labelnames, buckets=buckets)
     except ValueError:
-        # Metric already exists, find and return it
-        # Search through all collectors to find the one with matching name
+        # Race condition: metric was created between check and creation
+        # Find and return the existing one
         for collector in list(REGISTRY._collector_to_names.keys()):
             if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Histogram):
-                return collector
-        # If not found, raise the original error
+                if (hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames) and
+                    hasattr(collector, '_buckets') and collector._buckets == buckets):
+                    return collector
         raise
 
 
