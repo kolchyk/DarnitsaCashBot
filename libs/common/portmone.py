@@ -6,73 +6,9 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from prometheus_client import Counter, Histogram, REGISTRY
 
 from libs.common import AppSettings, get_settings
 from libs.common.xml_utils import XMLParseError, flatten_xml, parse_xml_document
-
-
-# Prometheus metrics - created once, reused if module reloads
-def _get_or_create_counter(name, documentation, labelnames):
-    """Get existing Counter from registry or create a new one."""
-    # Check if metric already exists in registry
-    for collector in list(REGISTRY._collector_to_names.keys()):
-        if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Counter):
-            # Verify labelnames match
-            if hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames):
-                return collector
-    # Metric doesn't exist, create it
-    try:
-        return Counter(name, documentation, labelnames)
-    except ValueError:
-        # Race condition: metric was created between check and creation
-        # Find and return the existing one
-        for collector in list(REGISTRY._collector_to_names.keys()):
-            if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Counter):
-                if hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames):
-                    return collector
-        raise
-
-
-def _get_or_create_histogram(name, documentation, labelnames, buckets):
-    """Get existing Histogram from registry or create a new one."""
-    # Check if metric already exists in registry
-    for collector in list(REGISTRY._collector_to_names.keys()):
-        if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Histogram):
-            # Verify labelnames and buckets match
-            if (hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames) and
-                hasattr(collector, '_buckets') and collector._buckets == buckets):
-                return collector
-    # Metric doesn't exist, create it
-    try:
-        return Histogram(name, documentation, labelnames, buckets=buckets)
-    except ValueError:
-        # Race condition: metric was created between check and creation
-        # Find and return the existing one
-        for collector in list(REGISTRY._collector_to_names.keys()):
-            if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Histogram):
-                if (hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames) and
-                    hasattr(collector, '_buckets') and collector._buckets == buckets):
-                    return collector
-        raise
-
-
-PORTMONE_REQUEST_TOTAL = _get_or_create_counter(
-    "portmone_request_total",
-    "Total PortmoneDirect requests",
-    ["method", "status"],
-)
-PORTMONE_FAIL_TOTAL = _get_or_create_counter(
-    "portmone_fail_total",
-    "Failed PortmoneDirect requests grouped by error code",
-    ["method", "code"],
-)
-PORTMONE_REQUEST_LATENCY = _get_or_create_histogram(
-    "portmone_request_latency_seconds",
-    "Latency for PortmoneDirect requests",
-    ["method"],
-    buckets=(0.1, 0.3, 1, 2, 5, 10),
-)
 
 
 @dataclass
@@ -163,21 +99,14 @@ class PortmoneDirectClient:
         if self._lang:
             payload["lang"] = self._lang
 
-        start = time.perf_counter()
         try:
             response = await self._client.post("", data=payload)
             response.raise_for_status()
         except httpx.HTTPError as exc:  # pragma: no cover - delegated to retry logic
-            PORTMONE_FAIL_TOTAL.labels(method=method, code="transport").inc()
             raise PortmoneTransportError(str(exc)) from exc
-        duration = time.perf_counter() - start
 
         parsed = parse_portmone_response(response.text)
-        PORTMONE_REQUEST_TOTAL.labels(method=method, status=parsed.status).inc()
-        PORTMONE_REQUEST_LATENCY.labels(method=method).observe(duration)
         if parsed.status != "ok":
-            code = parsed.errors[0].code if parsed.errors else "unknown"
-            PORTMONE_FAIL_TOTAL.labels(method=method, code=code or "unknown").inc()
             raise PortmoneResponseError(parsed)
         return parsed
 

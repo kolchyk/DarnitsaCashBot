@@ -58,15 +58,6 @@ async def cmd_help(message: Message):
     )
 
 
-@router.message(Command("menu"))
-async def cmd_menu(message: Message):
-    """Показать главное меню"""
-    await message.answer(
-        "Головне меню:",
-        reply_markup=main_menu_keyboard(),
-    )
-
-
 @router.message(Command("history"))
 async def cmd_history(message: Message, receipt_client: ReceiptApiClient):
     history = await receipt_client.fetch_history(telegram_id=message.from_user.id)

@@ -92,8 +92,6 @@ class AppSettings(BaseSettings):
     jwt_secret: str = Field(default="jwt-secret", alias="JWT_SECRET")
     jwt_alg: str = Field(default="HS256", alias="JWT_ALG")
 
-    otel_endpoint: str | None = Field(default=None, alias="OTEL_EXPORTER_OTLP_ENDPOINT")
-    prometheus_dir: Path | None = Field(default=None, alias="PROMETHEUS_MULTIPROC_DIR")
     tesseract_cmd: str | None = Field(default=None, alias="TESSERACT_CMD")
     tessdata_dir: str | None = Field(default=None, alias="TESSDATA_DIR")
     ocr_languages: str = Field(default="ukr+eng", alias="OCR_LANGUAGES")
