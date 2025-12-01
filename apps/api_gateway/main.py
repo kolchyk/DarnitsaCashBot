@@ -6,7 +6,7 @@ import time
 import uuid
 
 from fastapi import FastAPI, Request, Response
-from prometheus_client import Counter, Histogram, generate_latest, REGISTRY
+from prometheus_client import Counter, Histogram, generate_latest
 from starlette.responses import PlainTextResponse
 
 try:
@@ -36,51 +36,29 @@ from .exceptions import (
 from .routes import router as api_router
 
 
-# Prometheus metrics - created once, reused if module reloads
-def _get_or_create_counter(name, documentation, labelnames):
-    """Get existing Counter from registry or create a new one."""
-    # Check if metric already exists in registry
-    for collector in list(REGISTRY._collector_to_names.keys()):
-        if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Counter):
-            # Verify labelnames match
-            if hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames):
-                return collector
-    # Metric doesn't exist, create it
-    try:
-        return Counter(name, documentation, labelnames)
-    except ValueError:
-        # Race condition: metric was created between check and creation
-        # Find and return the existing one
-        for collector in list(REGISTRY._collector_to_names.keys()):
-            if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Counter):
-                if hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames):
-                    return collector
-        raise
+# Module-level cache for Prometheus metrics to prevent duplicate registration
+_metrics_cache: dict[tuple[str, tuple], Counter | Histogram] = {}
 
 
-def _get_or_create_histogram(name, documentation, labelnames, buckets):
-    """Get existing Histogram from registry or create a new one."""
-    # Check if metric already exists in registry
-    for collector in list(REGISTRY._collector_to_names.keys()):
-        if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Histogram):
-            # Verify labelnames and buckets match
-            if (hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames) and
-                hasattr(collector, '_buckets') and collector._buckets == buckets):
-                return collector
-    # Metric doesn't exist, create it
-    try:
-        return Histogram(name, documentation, labelnames, buckets=buckets)
-    except ValueError:
-        # Race condition: metric was created between check and creation
-        # Find and return the existing one
-        for collector in list(REGISTRY._collector_to_names.keys()):
-            if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Histogram):
-                if (hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames) and
-                    hasattr(collector, '_buckets') and collector._buckets == buckets):
-                    return collector
-        raise
+def _get_or_create_counter(name: str, documentation: str, labelnames: list[str]) -> Counter:
+    """Get existing Counter from cache or create a new one."""
+    key = (name, tuple(labelnames))
+    if key not in _metrics_cache:
+        _metrics_cache[key] = Counter(name, documentation, labelnames)
+    return _metrics_cache[key]  # type: ignore[return-value]
 
 
+def _get_or_create_histogram(
+    name: str, documentation: str, labelnames: list[str], buckets: tuple[float, ...]
+) -> Histogram:
+    """Get existing Histogram from cache or create a new one."""
+    key = (name, tuple(labelnames))
+    if key not in _metrics_cache:
+        _metrics_cache[key] = Histogram(name, documentation, labelnames, buckets=buckets)
+    return _metrics_cache[key]  # type: ignore[return-value]
+
+
+# Prometheus metrics - created once per process using cache
 REQUEST_COUNT = _get_or_create_counter(
     "api_requests_total",
     "Total API requests",
