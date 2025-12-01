@@ -1,0 +1,28 @@
+#!/bin/bash
+# Setup script to copy Tesseract language data files to the correct location
+# This script runs during Heroku build
+
+set -e
+
+TESSDATA_SOURCE="./tessdata"
+TESSDATA_TARGET="/usr/share/tesseract-ocr/5/tessdata"
+
+# Create target directory if it doesn't exist
+mkdir -p "$TESSDATA_TARGET"
+
+# Copy language files if they exist
+if [ -d "$TESSDATA_SOURCE" ]; then
+    echo "Copying Tesseract language data files..."
+    for file in "$TESSDATA_SOURCE"/*.traineddata; do
+        if [ -f "$file" ]; then
+            filename=$(basename "$file")
+            echo "Copying $filename to $TESSDATA_TARGET"
+            cp "$file" "$TESSDATA_TARGET/"
+        fi
+    done
+    echo "Language data files copied successfully"
+    ls -lh "$TESSDATA_TARGET"/*.traineddata 2>/dev/null || echo "No traineddata files found"
+else
+    echo "Warning: $TESSDATA_SOURCE directory not found"
+fi
+

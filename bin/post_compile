@@ -1,0 +1,31 @@
+#!/bin/bash
+# Post-compile script for Heroku
+# This runs after the buildpack completes
+
+set -e
+
+echo "-----> Setting up Tesseract language data"
+
+TESSDATA_SOURCE="./tessdata"
+TESSDATA_TARGET="/usr/share/tesseract-ocr/5/tessdata"
+
+# Create target directory if it doesn't exist
+mkdir -p "$TESSDATA_TARGET"
+
+# Copy language files if they exist
+if [ -d "$TESSDATA_SOURCE" ]; then
+    echo "Copying Tesseract language data files from $TESSDATA_SOURCE to $TESSDATA_TARGET..."
+    for file in "$TESSDATA_SOURCE"/*.traineddata; do
+        if [ -f "$file" ]; then
+            filename=$(basename "$file")
+            echo "  Copying $filename"
+            cp "$file" "$TESSDATA_TARGET/"
+        fi
+    done
+    echo "Language data files copied successfully"
+    echo "Available languages:"
+    ls -1 "$TESSDATA_TARGET"/*.traineddata 2>/dev/null | xargs -n1 basename | sed 's/\.traineddata$//' || echo "  (none)"
+else
+    echo "Warning: $TESSDATA_SOURCE directory not found, skipping language data setup"
+fi
+
