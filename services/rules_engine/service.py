@@ -79,6 +79,14 @@ async def evaluate(payload: dict) -> None:
         has_darnitsa = False
         
         # Сохраняем все распознанные товары и проверяем наличие Дарница
+        LOGGER.info(
+            "Evaluating receipt %s: line_items=%d, daily_count=%d/%d",
+            receipt_id,
+            len(line_items),
+            daily_count,
+            MAX_RECEIPTS_PER_DAY,
+        )
+        
         for item in line_items:
             # Используем оригинальный текст для поиска кириллицы
             original_name = item.get("original_name", item.get("name", ""))
@@ -90,9 +98,11 @@ async def evaluate(payload: dict) -> None:
             # Проверяем наличие Дарница в оригинальном тексте (кириллица)
             if any(keyword in original_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC):
                 has_darnitsa = True
+                LOGGER.debug("Found Darnitsa keyword (cyrillic) in item: '%s'", original_name[:50])
             # Проверяем в нормализованном тексте (транслитерация)
             elif any(keyword in normalized_lower for keyword in DARNITSA_KEYWORDS_LATIN):
                 has_darnitsa = True
+                LOGGER.debug("Found Darnitsa keyword (latin) in item: '%s'", normalized_name[:50])
             
             quantity = int(item.get("quantity", 1))
             price = item.get("price")
@@ -107,7 +117,7 @@ async def evaluate(payload: dict) -> None:
                 LineItem(
                     receipt_id=receipt.id,
                     sku_code=sku_code,
-                    product_name=name,
+                    product_name=normalized_name,  # Fixed: use normalized_name instead of undefined 'name'
                     quantity=quantity,
                     unit_price=price,
                     total_price=price * quantity,
@@ -117,6 +127,29 @@ async def evaluate(payload: dict) -> None:
         
         # Принимаем чек только если найден товар с Дарница
         receipt.status = "accepted" if (has_items and has_darnitsa) else "rejected"
+        
+        rejection_reason = None
+        if not has_items:
+            rejection_reason = "no_line_items"
+        elif not has_darnitsa:
+            rejection_reason = "no_darnitsa_products"
+        
+        if receipt.status == "accepted":
+            LOGGER.info(
+                "Receipt %s ACCEPTED: line_items=%d, has_darnitsa=%s",
+                receipt_id,
+                len(line_items),
+                has_darnitsa,
+            )
+        else:
+            LOGGER.warning(
+                "Receipt %s REJECTED: reason=%s, line_items=%d, has_darnitsa=%s",
+                receipt_id,
+                rejection_reason,
+                len(line_items),
+                has_darnitsa,
+            )
+        
         await session.commit()
         
         # Trigger bonus payout if receipt was accepted

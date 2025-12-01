@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -80,8 +81,9 @@ async def cmd_history(message: Message, receipt_client: ReceiptApiClient):
         payout_status = item.get("payout_status") or "-"
         status_translated = translate_status(item["status"])
         payout_status_translated = translate_status(payout_status) if payout_status != "-" else "-"
+        uploaded_at_formatted = format_datetime_uk(item["uploaded_at"])
         lines.append(
-            f"- {status_translated} @ {item['uploaded_at']} (Portmone: {reference}, статус: {payout_status_translated})"
+            f"- {status_translated} @ {uploaded_at_formatted} (Portmone: {reference}, статус: {payout_status_translated})"
         )
     await message.answer("\n".join(lines), reply_markup=main_menu_keyboard())
 
@@ -174,4 +176,16 @@ def contact_saved_text() -> str:
 
 def consent_notice() -> str:
     return "Поділяючи свої контактні дані, ви погоджуєтеся з умовами акції та політикою конфіденційності Darnitsa."
+
+
+def format_datetime_uk(dt_str: str) -> str:
+    """Format datetime string to Ukrainian format: DD.MM.YYYY, HH:MM"""
+    try:
+        # Parse ISO format datetime string
+        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+        # Format as DD.MM.YYYY, HH:MM
+        return dt.strftime("%d.%m.%Y, %H:%M")
+    except (ValueError, AttributeError):
+        # Fallback to original string if parsing fails
+        return dt_str
 

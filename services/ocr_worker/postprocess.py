@@ -11,9 +11,13 @@ from pendulum.parsing.exceptions import ParserError
 from Levenshtein import distance as levenshtein_distance
 from unidecode import unidecode
 
+import logging
+
 from libs.common import AppSettings
 
 from .tesseract_runner import OcrToken
+
+LOGGER = logging.getLogger(__name__)
 
 TOTAL_KEYWORDS = ("total", "итого", "всього", "sum", "сума", "amount")
 
@@ -40,13 +44,31 @@ def build_structured_payload(
 ) -> dict[str, Any]:
     header_height = preprocess_metadata.get("crops", {}).get("header", {}).get("height", 0)
     merchant = _extract_merchant(tokens_by_profile.get("full", []), header_height)
+    LOGGER.debug("Extracted merchant: %s", merchant)
+    
     purchase_ts = _extract_purchase_ts(tokens_by_profile)
+    LOGGER.debug("Extracted purchase timestamp: %s", purchase_ts.isoformat() if purchase_ts else None)
 
-    line_clusters = cluster_tokens_by_line(tokens_by_profile.get("line_items", []))
-    line_items = [_line_item_from_cluster(cluster, catalog_aliases) for cluster in line_clusters]
+    line_tokens = tokens_by_profile.get("line_items", [])
+    LOGGER.debug("Clustering %d line item tokens", len(line_tokens))
+    line_clusters = cluster_tokens_by_line(line_tokens)
+    LOGGER.debug("Created %d line clusters from tokens", len(line_clusters))
+    
+    line_items = []
+    sku_matches = 0
+    for cluster in line_clusters:
+        item = _line_item_from_cluster(cluster, catalog_aliases)
+        line_items.append(item)
+        if item.get("sku_code"):
+            sku_matches += 1
+    
+    LOGGER.debug("Processed %d line items, %d SKU matches found", len(line_items), sku_matches)
 
-    total_candidates = cluster_tokens_by_line(tokens_by_profile.get("totals", []), y_threshold=25)
+    total_tokens = tokens_by_profile.get("totals", [])
+    LOGGER.debug("Processing %d total tokens", len(total_tokens))
+    total_candidates = cluster_tokens_by_line(total_tokens, y_threshold=25)
     total_amount = _detect_total(total_candidates)
+    LOGGER.debug("Detected total amount: %s from %d candidates", total_amount, len(total_candidates))
 
     line_total_sum = sum(item["price"] for item in line_items if item["price"] is not None)
     anomalies: list[str] = []
@@ -118,11 +140,20 @@ def cluster_tokens_by_line(tokens: Sequence[OcrToken], y_threshold: int = 18) ->
     if current_cluster:
         clusters.append(current_cluster)
 
-    return [
+    line_clusters = [
         LineCluster(text=_join_tokens(cluster), tokens=cluster)
         for cluster in clusters
         if _join_tokens(cluster)
     ]
+    
+    LOGGER.debug(
+        "Clustered %d tokens into %d lines (y_threshold=%d)",
+        len(sorted_tokens),
+        len(line_clusters),
+        y_threshold,
+    )
+    
+    return line_clusters
 
 
 def _join_tokens(tokens: Iterable[OcrToken]) -> str:
@@ -261,8 +292,12 @@ def _match_sku(name: str, catalog_aliases: dict[str, list[str]]) -> tuple[str | 
             if similarity > best_score:
                 best_score = similarity
                 best_code = sku_code
-    if best_score < 0.75:
-        return None, best_score
+    
+    if best_score >= 0.75:
+        LOGGER.debug("SKU match found: name='%s' -> sku=%s, score=%.3f", name[:50], best_code, best_score)
+    else:
+        LOGGER.debug("No SKU match: name='%s', best_score=%.3f (threshold=0.75)", name[:50], best_score)
+    
     return best_code, best_score
 
 

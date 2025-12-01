@@ -110,9 +110,11 @@ class TesseractRunner:
             lang_names = [f.stem for f in available_langs]
             LOGGER.info("Available language files: %s", ", ".join(lang_names) if lang_names else "none")
             
-            # Check if required languages are available
-            required_langs = ["ukr", "rus", "eng"]
-            missing_langs = [lang for lang in required_langs if f"{lang}.traineddata" not in [f.name for f in available_langs]]
+            # Check if configured languages are available
+            # Parse languages from settings (format: "ukr", "ukr+eng", etc.)
+            configured_langs = [lang.strip() for lang in settings.ocr_languages.split("+")]
+            available_lang_names = [f.stem for f in available_langs]
+            missing_langs = [lang for lang in configured_langs if lang not in available_lang_names]
             if missing_langs:
                 LOGGER.error("Missing required language files: %s in %s", ", ".join(missing_langs), tessdata_path)
         else:
@@ -167,11 +169,29 @@ class TesseractRunner:
             if image is None:
                 LOGGER.warning("Missing image for profile %s", key)
                 continue
+            
+            image_size = f"{image.width}x{image.height}" if hasattr(image, 'width') else "unknown"
+            LOGGER.debug("Running Tesseract profile '%s' on image %s", key, image_size)
+            
             profile_tokens, profile_stats, raw_artifact = self._run_profile(profile, image)
             tokens_by_profile[key] = profile_tokens
             stats[key] = profile_stats
             artifacts.append(raw_artifact)
+            
+            LOGGER.debug(
+                "Profile '%s' completed: tokens=%d, mean_confidence=%.3f",
+                key,
+                profile_stats.get("token_count", 0),
+                profile_stats.get("mean_confidence", 0.0),
+            )
 
+        total_tokens = sum(len(tokens) for tokens in tokens_by_profile.values())
+        LOGGER.info(
+            "Tesseract run completed: total_tokens=%d across %d profiles",
+            total_tokens,
+            len(tokens_by_profile),
+        )
+        
         return TesseractResult(tokens_by_profile=tokens_by_profile, stats=stats, artifacts=artifacts)
 
     def _run_profile(
@@ -202,12 +222,18 @@ class TesseractRunner:
 
         tokens: list[OcrToken] = []
         confidences: list[float] = []
+        low_confidence_count = 0
+        
         for idx, text in enumerate(dict_output["text"]):
             cleaned = text.strip()
             conf_value = float(dict_output["conf"][idx]) if dict_output["conf"][idx] not in {"", "-1"} else 0.0
             conf_norm = max(conf_value, 0.0) / 100
             if not cleaned:
                 continue
+            
+            if conf_norm < 0.5:
+                low_confidence_count += 1
+            
             confidences.append(conf_norm)
             tokens.append(
                 OcrToken(
@@ -219,6 +245,14 @@ class TesseractRunner:
                     height=int(dict_output["height"][idx]),
                     profile=profile.name,
                 )
+            )
+        
+        if low_confidence_count > 0:
+            LOGGER.warning(
+                "Profile '%s': %d tokens with low confidence (<0.5) out of %d total",
+                profile.name,
+                low_confidence_count,
+                len(tokens),
             )
 
         stats = {
