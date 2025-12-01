@@ -132,6 +132,7 @@ async def _persist_artifacts(
 
 async def _publish_failure(payload: dict, failure_payload: dict) -> None:
     # RabbitMQ removed - failures are now stored in database only
+    pass
 
 
 async def run_worker() -> None:
