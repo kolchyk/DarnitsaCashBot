@@ -21,23 +21,27 @@ class MessageBroker:
         self.settings = settings or get_settings()
 
     async def publish(self, queue: str, payload: dict) -> None:
-        async with self._connection() as connection:
+        connection = await aio_pika.connect_robust(
+            host=self.settings.rabbitmq_host,
+            port=self.settings.rabbitmq_port,
+            login=self.settings.rabbitmq_user,
+            password=self.settings.rabbitmq_password,
+        )
+        async with connection:
             channel = await connection.channel()
             message = aio_pika.Message(body=json.dumps(payload).encode("utf-8"))
             await channel.default_exchange.publish(message, routing_key=queue)
 
     @asynccontextmanager
     async def consume(self, queue: str):
-        async with self._connection() as connection:
-            channel = await connection.channel()
-            queue_obj = await channel.declare_queue(queue, durable=True)
-            yield queue_obj
-
-    def _connection(self):
-        return aio_pika.connect_robust(
+        connection = await aio_pika.connect_robust(
             host=self.settings.rabbitmq_host,
             port=self.settings.rabbitmq_port,
             login=self.settings.rabbitmq_user,
             password=self.settings.rabbitmq_password,
         )
+        async with connection:
+            channel = await connection.channel()
+            queue_obj = await channel.declare_queue(queue, durable=True)
+            yield queue_obj
 
