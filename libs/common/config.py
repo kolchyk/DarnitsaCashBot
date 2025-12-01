@@ -82,6 +82,9 @@ class AppSettings(BaseSettings):
     portmone_lang: str | None = Field(default=None, alias="PORTMONE_LANG")
     portmone_cert_path: Path | None = Field(default=None, alias="PORTMONE_CERT_PATH")
     portmone_payee_id: str = Field(default="100000", alias="PORTMONE_PAYEE_ID")
+    portmone_payee_id_kyivstar: str | None = Field(default=None, alias="PORTMONE_PAYEE_ID_KYIVSTAR")
+    portmone_payee_id_vodafone: str | None = Field(default=None, alias="PORTMONE_PAYEE_ID_VODAFONE")
+    portmone_payee_id_lifecell: str | None = Field(default=None, alias="PORTMONE_PAYEE_ID_LIFECELL")
     portmone_default_currency: str = Field(default="UAH", alias="PORTMONE_DEFAULT_CURRENCY")
     portmone_webhook_token: str | None = Field(default=None, alias="PORTMONE_WEBHOOK_TOKEN")
 

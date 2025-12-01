@@ -38,22 +38,31 @@ from .routes import router as api_router
 
 def _get_or_create_counter(name: str, documentation: str, labelnames: list[str]) -> Counter:
     """Get existing Counter from registry or create a new one."""
-    # Check if metric already exists in registry
-    for collector in list(REGISTRY._collector_to_names.keys()):
-        if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Counter):
-            # Verify labelnames match
-            if hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames):
-                return collector
-    # Metric doesn't exist, create it
+    if labelnames is None:
+        labelnames = []
+    
+    # Try to find an existing collector by name
+    existing = REGISTRY._names_to_collectors.get(name)  # private API but widely used
+    if existing:
+        # _names_to_collectors returns a list, find the Counter instance
+        for collector in existing:
+            if isinstance(collector, Counter):
+                # Verify labelnames match
+                if hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames):
+                    return collector
+    
+    # Create and register a new Counter
     try:
         return Counter(name, documentation, labelnames)
     except ValueError:
         # Race condition: metric was created between check and creation
         # Find and return the existing one
-        for collector in list(REGISTRY._collector_to_names.keys()):
-            if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Counter):
-                if hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames):
-                    return collector
+        existing = REGISTRY._names_to_collectors.get(name)
+        if existing:
+            for collector in existing:
+                if isinstance(collector, Counter):
+                    if hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames):
+                        return collector
         raise
 
 
@@ -61,24 +70,33 @@ def _get_or_create_histogram(
     name: str, documentation: str, labelnames: list[str], buckets: tuple[float, ...]
 ) -> Histogram:
     """Get existing Histogram from registry or create a new one."""
-    # Check if metric already exists in registry
-    for collector in list(REGISTRY._collector_to_names.keys()):
-        if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Histogram):
-            # Verify labelnames and buckets match
-            if (hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames) and
-                hasattr(collector, '_buckets') and collector._buckets == buckets):
-                return collector
-    # Metric doesn't exist, create it
+    if labelnames is None:
+        labelnames = []
+    
+    # Try to find an existing collector by name
+    existing = REGISTRY._names_to_collectors.get(name)  # private API but widely used
+    if existing:
+        # _names_to_collectors returns a list, find the Histogram instance
+        for collector in existing:
+            if isinstance(collector, Histogram):
+                # Verify labelnames and buckets match
+                if (hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames) and
+                    hasattr(collector, '_buckets') and collector._buckets == buckets):
+                    return collector
+    
+    # Create and register a new Histogram
     try:
         return Histogram(name, documentation, labelnames, buckets=buckets)
     except ValueError:
         # Race condition: metric was created between check and creation
         # Find and return the existing one
-        for collector in list(REGISTRY._collector_to_names.keys()):
-            if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Histogram):
-                if (hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames) and
-                    hasattr(collector, '_buckets') and collector._buckets == buckets):
-                    return collector
+        existing = REGISTRY._names_to_collectors.get(name)
+        if existing:
+            for collector in existing:
+                if isinstance(collector, Histogram):
+                    if (hasattr(collector, '_labelnames') and collector._labelnames == tuple(labelnames) and
+                        hasattr(collector, '_buckets') and collector._buckets == buckets):
+                        return collector
         raise
 
 

@@ -218,6 +218,44 @@ def parse_portmone_response(xml_text: str) -> PortmoneResponse:
     return PortmoneResponse(status=status, raw=xml_text, data=data, errors=errors)
 
 
+def get_operator_payee_id(phone_number: str, settings: AppSettings) -> str:
+    """
+    Определяет payeeId оператора по номеру телефона.
+    
+    Args:
+        phone_number: Номер телефона в формате 380XXXXXXXXX (12 цифр)
+        settings: Настройки приложения с payeeId для каждого оператора
+        
+    Returns:
+        payeeId для соответствующего оператора или общий payeeId по умолчанию
+        
+    Операторы:
+        - Київстар: 039, 067, 068, 096, 097, 098
+        - Vodafone: 050, 066, 095, 099
+        - lifecell: 063, 073, 093
+    """
+    if not phone_number.startswith("380") or len(phone_number) != 12:
+        # Если номер не в правильном формате, возвращаем общий payeeId
+        return settings.portmone_payee_id
+    
+    prefix = phone_number[3:5]  # Первые 2 цифры после 380
+    
+    # Київстар: 039, 067, 068, 096, 097, 098
+    if prefix in ['39', '67', '68', '96', '97', '98']:
+        return settings.portmone_payee_id_kyivstar or settings.portmone_payee_id
+    
+    # Vodafone: 050, 066, 095, 099
+    elif prefix in ['50', '66', '95', '99']:
+        return settings.portmone_payee_id_vodafone or settings.portmone_payee_id
+    
+    # lifecell: 063, 073, 093
+    elif prefix in ['63', '73', '93']:
+        return settings.portmone_payee_id_lifecell or settings.portmone_payee_id
+    
+    # Неизвестный оператор - используем общий payeeId
+    return settings.portmone_payee_id
+
+
 __all__ = [
     "PortmoneDirectClient",
     "PortmoneError",
@@ -226,5 +264,6 @@ __all__ = [
     "PortmoneResponse",
     "PortmoneErrorDetail",
     "parse_portmone_response",
+    "get_operator_payee_id",
 ]
 

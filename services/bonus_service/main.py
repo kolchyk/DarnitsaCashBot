@@ -17,6 +17,7 @@ from libs.common.portmone import (
     PortmoneResponse,
     PortmoneResponseError,
     PortmoneTransportError,
+    get_operator_payee_id,
 )
 from libs.common.constants import MAX_SUCCESSFUL_PAYOUTS_PER_DAY
 from libs.data import async_session_factory
@@ -117,6 +118,33 @@ async def _prepare_bonus_context(
         if not phone:
             return None
 
+        # Нормализуем номер телефона: убираем пробелы, дефисы и другие символы
+        # Ожидаемый формат: 380XXXXXXXXX (12 цифр)
+        phone_normalized = "".join(filter(str.isdigit, phone))
+        
+        # Если номер не начинается с 380, добавляем префикс
+        if not phone_normalized.startswith("380"):
+            # Если номер начинается с 0, заменяем на 380
+            if phone_normalized.startswith("0"):
+                phone_normalized = "380" + phone_normalized[1:]
+            # Если номер начинается с 80, добавляем 3
+            elif phone_normalized.startswith("80"):
+                phone_normalized = "3" + phone_normalized
+            # Если номер начинается с 8, добавляем 380
+            elif phone_normalized.startswith("8"):
+                phone_normalized = "380" + phone_normalized[1:]
+            else:
+                # Если номер не в известном формате, добавляем 380
+                phone_normalized = "380" + phone_normalized
+        
+        # Проверяем, что номер в правильном формате (380XXXXXXXXX, 12 цифр)
+        if not phone_normalized.startswith("380") or len(phone_normalized) != 12:
+            # Если номер не в правильном формате, используем оригинальный
+            phone_normalized = phone
+
+        # Определяем payeeId оператора по номеру телефона
+        payee_id = get_operator_payee_id(phone_normalized, settings)
+
         bonus: BonusTransaction | None = receipt.bonus_transaction
         
         # Проверяем общее количество успешных начислений за сегодня
@@ -141,16 +169,16 @@ async def _prepare_bonus_context(
             bonus = BonusTransaction(
                 receipt_id=receipt.id,
                 user_id=user.id,
-                msisdn=phone,
+                msisdn=phone_normalized,
                 amount=100,
             )
             session.add(bonus)
             await session.flush()
 
-        bonus.msisdn = phone
+        bonus.msisdn = phone_normalized
         bonus.provider = "portmone"
-        bonus.payee_id = settings.portmone_payee_id
-        bonus.contract_number = phone
+        bonus.payee_id = payee_id
+        bonus.contract_number = phone_normalized
         bonus.currency = settings.portmone_default_currency
         bonus.payout_status = BonusStatus.IN_PROGRESS
         bonus.portmone_status = "pending"
@@ -160,10 +188,10 @@ async def _prepare_bonus_context(
         return BonusContext(
             receipt_id=receipt.id,
             bonus_id=bonus.id,
-            msisdn=phone,
+            msisdn=phone_normalized,
             amount=bonus.amount,
-            payee_id=bonus.payee_id or settings.portmone_payee_id,
-            contract_number=bonus.contract_number or phone,
+            payee_id=payee_id,
+            contract_number=phone_normalized,
             currency=bonus.currency,
             telegram_id=user.telegram_id if user else None,
         )
