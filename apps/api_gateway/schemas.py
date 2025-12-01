@@ -20,9 +20,16 @@ class UserResponse(BaseModel):
     has_phone: bool
 
 
+class DarnitsaProduct(BaseModel):
+    name: str
+    price: float  # Price in UAH (converted from kopecks)
+    quantity: int
+
+
 class ReceiptResponse(BaseModel):
     receipt_id: UUID
     status: str
+    darnitsa_products: list[DarnitsaProduct] | None = None
 
 
 class ReceiptHistoryItem(BaseModel):

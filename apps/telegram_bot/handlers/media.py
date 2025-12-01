@@ -61,10 +61,36 @@ async def check_ocr_status(telegram_id: int, receipt_id: str, receipt_client: Re
         
         # If OCR succeeded (processing or accepted), send success message
         if status in ("processing", "accepted"):
-            await bot.send_message(
-                telegram_id,
-                "✅ Чек успішно розпізнано! Вам буде зараховано 1 грн на мобільний протягом години."
-            )
+            darnitsa_products = status_response.get("darnitsa_products")
+            
+            if darnitsa_products and len(darnitsa_products) > 0:
+                # Build detailed message about found Darnitsa products
+                message_parts = ["✅ Чек успішно розпізнано!\n\n"]
+                message_parts.append("Знайдено препарат(и) Дарниця:\n")
+                
+                for product in darnitsa_products:
+                    product_name = product.get("name", "Невідомий препарат")
+                    price = product.get("price", 0)
+                    quantity = product.get("quantity", 1)
+                    
+                    if quantity > 1:
+                        message_parts.append(f"• {product_name} (кількість: {quantity}, ціна: {price:.2f} грн)\n")
+                    else:
+                        message_parts.append(f"• {product_name} (ціна: {price:.2f} грн)\n")
+                
+                if len(darnitsa_products) == 1:
+                    message_parts.append("\n💰 Вам буде нараховано бонус за цей препарат!")
+                else:
+                    message_parts.append("\n💰 Вам буде нараховано бонус за знайдені препарати!")
+                message_parts.append("\n💳 Вам буде зараховано 1 грн на мобільний протягом години.")
+                
+                await bot.send_message(telegram_id, "".join(message_parts))
+            else:
+                # Fallback message if products not found yet (shouldn't happen, but just in case)
+                await bot.send_message(
+                    telegram_id,
+                    "✅ Чек успішно розпізнано! Вам буде зараховано 1 грн на мобільний протягом години."
+                )
         # If OCR failed (rejected), offer manual input
         elif status == "rejected":
             _pending_receipts[telegram_id] = receipt_id

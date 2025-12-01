@@ -14,7 +14,7 @@ from uuid import UUID
 from libs.common.analytics import AnalyticsClient
 from libs.common.rate_limit import RateLimiter
 from libs.common.storage import StorageClient
-from libs.data.models import Receipt
+from libs.data.models import LineItem, Receipt
 from libs.data.repositories import ReceiptRepository, UserRepository
 
 from ..dependencies import (
@@ -24,6 +24,7 @@ from ..dependencies import (
     get_storage_client,
 )
 from ..schemas import (
+    DarnitsaProduct,
     ManualReceiptDataRequest,
     ReceiptHistoryItem,
     ReceiptResponse,
@@ -233,17 +234,47 @@ async def get_receipt_status(
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
     
-    # Commit read-only transaction to avoid ROLLBACK log noise
-    await session.commit()
-    
     # Check if OCR failed by looking at ocr_payload
     ocr_payload = receipt.ocr_payload
     if ocr_payload and isinstance(ocr_payload, dict):
         # If ocr_payload has error field, it means OCR failed
         if ocr_payload.get("error") or ocr_payload.get("type") in ("unreadable_image", "tesseract_failure"):
+            await session.commit()
             return ReceiptResponse(receipt_id=receipt.id, status="rejected")
     
-    return ReceiptResponse(receipt_id=receipt.id, status=receipt.status)
+    # Load line items and filter Darnitsa products
+    darnitsa_products: list[DarnitsaProduct] = []
+    if receipt.status in ("processing", "accepted"):
+        # Keywords for identifying Darnitsa products (same as in rules_engine)
+        DARNITSA_KEYWORDS = [
+            "дарниця", "дарница", "дарниці", "дарницю", "дарницею", "darnitsa",
+        ]
+        
+        line_items_stmt = select(LineItem).where(LineItem.receipt_id == receipt_id)
+        line_items_result = await session.execute(line_items_stmt)
+        line_items = line_items_result.scalars().all()
+        
+        for item in line_items:
+            name_lower = item.product_name.lower()
+            if any(keyword in name_lower for keyword in DARNITSA_KEYWORDS):
+                # Convert price from kopecks to UAH
+                price_uah = item.unit_price / 100.0
+                darnitsa_products.append(
+                    DarnitsaProduct(
+                        name=item.product_name,
+                        price=price_uah,
+                        quantity=item.quantity,
+                    )
+                )
+    
+    # Commit read-only transaction to avoid ROLLBACK log noise
+    await session.commit()
+    
+    return ReceiptResponse(
+        receipt_id=receipt.id,
+        status=receipt.status,
+        darnitsa_products=darnitsa_products if darnitsa_products else None,
+    )
 
 
 @router.post("/receipts/{receipt_id}/manual", response_model=ReceiptResponse)
