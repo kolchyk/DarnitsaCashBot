@@ -157,19 +157,46 @@ def _extract_purchase_ts(tokens_by_profile: dict[str, list[OcrToken]]):
             continue
         date_part = match.group("date")
         time_part = match.groupdict().get("time")
-        try:
-            if time_part:
-                return pendulum.from_format(f"{date_part} {time_part}", "DD.MM.YYYY HH:mm:ss")
-        except ParserError:
+        
+        # Normalize date separators to dots for DD.MM.YYYY format
+        normalized_date = date_part.replace("/", ".").replace("-", ".")
+        
+        # Try parsing with time component
+        if time_part:
+            # Determine time format based on whether seconds are present
+            time_format = "HH:mm:ss" if ":" in time_part and time_part.count(":") == 2 else "HH:mm"
+            
+            # Try multiple date formats with normalized separators
+            date_time_formats = [
+                (f"{normalized_date} {time_part}", f"DD.MM.YYYY {time_format}"),
+                (f"{date_part} {time_part}", f"DD.MM.YYYY {time_format}"),  # Original separators
+                (f"{date_part} {time_part}", None),  # Let pendulum.parse handle it
+            ]
+            
+            for date_time_str, fmt in date_time_formats:
+                try:
+                    if fmt:
+                        return pendulum.from_format(date_time_str, fmt)
+                    else:
+                        return pendulum.parse(date_time_str, strict=False)
+                except (ParserError, ValueError):
+                    continue
+        
+        # Try parsing date only
+        date_formats = [
+            (normalized_date, "DD.MM.YYYY"),
+            (date_part, None),  # Let pendulum.parse handle it
+        ]
+        
+        for date_str, fmt in date_formats:
             try:
-                if time_part:
-                    return pendulum.parse(f"{date_part} {time_part}", strict=False)
-            except Exception:
-                pass
-        try:
-            return pendulum.parse(date_part, strict=False)
-        except Exception:
-            continue
+                if fmt:
+                    return pendulum.from_format(date_str, fmt)
+                else:
+                    return pendulum.parse(date_str, strict=False)
+            except (ParserError, ValueError):
+                continue
+    
     return None
 
 

@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from uuid import UUID
 
+from sqlalchemy import func, select
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from libs.common import AppSettings, configure_logging, get_settings
@@ -18,6 +20,8 @@ from libs.common.portmone import (
 )
 from libs.data import async_session_factory
 from libs.data.models import BonusStatus, BonusTransaction, Receipt, ReceiptStatus, User
+
+MAX_SUCCESSFUL_PAYOUTS_PER_DAY = 10
 
 
 @dataclass
@@ -115,6 +119,25 @@ async def _prepare_bonus_context(
             return None
 
         bonus: BonusTransaction | None = receipt.bonus_transaction
+        
+        # Проверяем общее количество успешных начислений за сегодня
+        # Если уже достигнут лимит, не создаем новое начисление
+        today = datetime.now(timezone.utc).date()
+        successful_payouts_count_stmt = (
+            select(func.count(BonusTransaction.id))
+            .where(BonusTransaction.payout_status == BonusStatus.SUCCESS)
+            .where(func.date(BonusTransaction.created_at) == today)
+        )
+        # Если бонус уже существует для этого чека и он успешен, исключаем его из подсчета
+        if bonus and bonus.payout_status == BonusStatus.SUCCESS:
+            successful_payouts_count_stmt = successful_payouts_count_stmt.where(BonusTransaction.id != bonus.id)
+        
+        successful_payouts_count_result = await session.execute(successful_payouts_count_stmt)
+        successful_payouts_count = successful_payouts_count_result.scalar_one() or 0
+        
+        if successful_payouts_count >= MAX_SUCCESSFUL_PAYOUTS_PER_DAY:
+            # Достигнут лимит успешных начислений на сегодня
+            return None
         if not bonus:
             bonus = BonusTransaction(
                 receipt_id=receipt.id,
