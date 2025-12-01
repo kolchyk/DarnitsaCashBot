@@ -233,6 +233,9 @@ async def get_receipt_status(
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
     
+    # Commit read-only transaction to avoid ROLLBACK log noise
+    await session.commit()
+    
     # Check if OCR failed by looking at ocr_payload
     ocr_payload = receipt.ocr_payload
     if ocr_payload and isinstance(ocr_payload, dict):
@@ -350,5 +353,7 @@ async def get_history(
                 payout_status=bonus.payout_status if bonus else None,
             )
         )
+    # Commit read-only transaction to avoid ROLLBACK log noise
+    await session.commit()
     return history
 

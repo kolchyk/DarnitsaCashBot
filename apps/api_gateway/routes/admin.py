@@ -46,6 +46,8 @@ async def search_receipts(
         }
         for receipt, user in result.all()
     ]
+    # Commit read-only transaction to avoid ROLLBACK log noise
+    await session.commit()
     return data
 
 
