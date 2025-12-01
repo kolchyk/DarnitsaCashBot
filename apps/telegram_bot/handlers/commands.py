@@ -22,8 +22,9 @@ async def cmd_start(message: Message, receipt_client: ReceiptApiClient):
     )
     has_phone = bool(user_info.get("has_phone"))
     reply_markup = contact_keyboard(_) if not has_phone else ReplyKeyboardRemove()
+    user_name = message.from_user.first_name or ""
     await message.answer(
-        onboarding_text(_, require_phone=not has_phone),
+        onboarding_text(_, require_phone=not has_phone, user_name=user_name),
         reply_markup=reply_markup,
     )
 
@@ -90,15 +91,20 @@ def get_locale(message: Message) -> str:
     return (message.from_user.language_code or "uk")[:2]
 
 
-def onboarding_text(_, *, require_phone: bool) -> str:
+def onboarding_text(_, *, require_phone: bool, user_name: str = "") -> str:
     consent = consent_notice(_)
+    greeting = _("Hello, {name}! 👋").format(name=user_name) if user_name else _("Hello! 👋")
+    
     if require_phone:
         return _(
-            "Welcome to DarnitsaCashBot! Share your phone number so we can send 1₴ EasyPay top-ups for each approved receipt. {consent}"
-        ).format(consent=consent)
+            "{greeting}\n\n"
+            "Welcome to DarnitsaCashBot! 🎉\n\n"
+            "Share your phone number so we can send 1₴ EasyPay top-ups for each approved receipt. {consent}"
+        ).format(greeting=greeting, consent=consent)
     return _(
+        "{greeting}\n\n"
         "Welcome back! We already have your phone number—just send a Darnitsa receipt photo to receive your next 1₴ top-up. {consent}"
-    ).format(consent=consent)
+    ).format(greeting=greeting, consent=consent)
 
 
 def contact_keyboard(_) -> ReplyKeyboardMarkup:

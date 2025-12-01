@@ -67,6 +67,15 @@ services:
     ports:
       - "8080:8080"
 
+  portmone-mock:
+    build:
+      context: .
+      dockerfile: services/portmone_mock/Dockerfile
+    environment:
+      PORT: 8082
+    ports:
+      - "8082:8082"
+
 volumes:
   postgres_data:
   minio_data:

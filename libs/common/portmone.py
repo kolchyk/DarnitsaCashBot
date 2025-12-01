@@ -93,6 +93,7 @@ class PortmoneDirectClient:
         self,
         settings: AppSettings | None = None,
         timeout: float = 10.0,
+        client: httpx.AsyncClient | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self._auth = {
@@ -103,7 +104,8 @@ class PortmoneDirectClient:
         self._lang = self.settings.portmone_lang
         base = self.settings.portmone_api_base.rstrip("/") + "/"
         cert = str(self.settings.portmone_cert_path) if self.settings.portmone_cert_path else None
-        self._client = httpx.AsyncClient(base_url=base, cert=cert, timeout=timeout)
+        self._owns_client = client is None
+        self._client = client or httpx.AsyncClient(base_url=base, cert=cert, timeout=timeout)
 
     async def call(self, method: str, **params: Any) -> PortmoneResponse:
         payload = {"method": method, **self._auth, **params}
@@ -129,7 +131,8 @@ class PortmoneDirectClient:
         return parsed
 
     async def aclose(self) -> None:
-        await self._client.aclose()
+        if self._owns_client:
+            await self._client.aclose()
 
     async def __aenter__(self) -> "PortmoneDirectClient":
         return self
