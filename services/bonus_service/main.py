@@ -18,10 +18,9 @@ from libs.common.portmone import (
     PortmoneResponseError,
     PortmoneTransportError,
 )
+from libs.common.constants import MAX_SUCCESSFUL_PAYOUTS_PER_DAY
 from libs.data import async_session_factory
 from libs.data.models import BonusStatus, BonusTransaction, Receipt, ReceiptStatus, User
-
-MAX_SUCCESSFUL_PAYOUTS_PER_DAY = 10
 
 
 @dataclass
@@ -230,30 +229,6 @@ async def _record_failure(
     # RabbitMQ removed - bonus events are now stored in database only
 
 
-async def worker_loop() -> None:
-    settings = get_settings()
-    configure_logging(settings.log_level)
-    analytics = AnalyticsClient(settings)
-    encryptor = Encryptor()
-    client = PortmoneDirectClient(settings)
-
-    try:
-        # RabbitMQ removed - worker no longer consumes from queue
-        # This worker should be called directly or via HTTP endpoint instead
-        while True:
-            await asyncio.sleep(60)  # Placeholder - no longer consuming from queue
-    finally:
-        await client.aclose()
-
-
-def run_worker():
-    asyncio.run(worker_loop())
-
-
-def run():
-    asyncio.run(worker_loop())
-
-
-if __name__ == "__main__":
-    asyncio.run(worker_loop())
+# Worker functions removed - bonus payouts are now triggered via event system
+# This file is kept for backward compatibility but worker loop is no longer needed
 

@@ -18,13 +18,37 @@ def _init_engine():
         # Add SSL parameters for Heroku Postgres
         connect_args = {}
         if settings._heroku_database_url:
-            # Heroku Postgres requires SSL - asyncpg uses ssl='require' for production
-            # This ensures SSL is used without strict certificate validation
             import ssl
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-            connect_args = {"ssl": ssl_context}
+            
+            # Determine SSL mode based on environment and configuration
+            ssl_mode = settings.postgres_ssl_mode.lower()
+            
+            if ssl_mode == "disable":
+                # No SSL
+                connect_args = {}
+            elif ssl_mode == "require":
+                # SSL required but no certificate verification (for Heroku compatibility)
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                connect_args = {"ssl": ssl_context}
+            elif ssl_mode == "verify-full":
+                # Full SSL with certificate verification (recommended for production)
+                if settings.app_env == "prod":
+                    ssl_context = ssl.create_default_context()
+                    connect_args = {"ssl": ssl_context}
+                else:
+                    # In non-prod, use require mode for compatibility
+                    ssl_context = ssl.create_default_context()
+                    ssl_context.check_hostname = False
+                    ssl_context.verify_mode = ssl.CERT_NONE
+                    connect_args = {"ssl": ssl_context}
+            else:
+                # Default: prefer SSL with relaxed verification (for Heroku compatibility)
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                connect_args = {"ssl": ssl_context}
         
         _engine = create_async_engine(
             settings.database_url,

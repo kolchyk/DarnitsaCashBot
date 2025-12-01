@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Sequence
 from uuid import UUID
 
@@ -93,13 +93,13 @@ class ReceiptRepository:
         return result.scalars().all()
 
     async def receipts_last_days(self, user_id: UUID, days: int) -> Sequence[Receipt]:
-        since = datetime.utcnow() - timedelta(days=days)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
         stmt = select(Receipt).where(Receipt.user_id == user_id, Receipt.upload_ts >= since)
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
     async def daily_submission_count(self, user_id: UUID) -> int:
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         stmt = (
             select(func.count(Receipt.id))
             .where(Receipt.user_id == user_id)

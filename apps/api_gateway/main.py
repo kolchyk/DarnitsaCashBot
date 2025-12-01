@@ -21,6 +21,18 @@ from libs.common.logging import set_correlation_id
 from libs.common.notifications import NotificationService
 
 from .background import bonus_event_listener, reminder_job
+from .exception_handlers import (
+    database_connection_error_handler,
+    database_error_handler,
+    database_schema_error_handler,
+    user_registration_error_handler,
+)
+from .exceptions import (
+    DatabaseConnectionError,
+    DatabaseSchemaError,
+    UserAlreadyExistsError,
+    UserRegistrationError,
+)
 from .routes import build_router
 
 
@@ -129,6 +141,15 @@ def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.log_level)
     app = FastAPI(title="DarnitsaCashBot API", version="0.1.0", lifespan=lifespan)
+    
+    # Register exception handlers
+    app.add_exception_handler(UserRegistrationError, user_registration_error_handler)
+    app.add_exception_handler(UserAlreadyExistsError, user_registration_error_handler)
+    app.add_exception_handler(DatabaseConnectionError, database_connection_error_handler)
+    app.add_exception_handler(DatabaseSchemaError, database_schema_error_handler)
+    from sqlalchemy.exc import SQLAlchemyError
+    app.add_exception_handler(SQLAlchemyError, database_error_handler)
+    
     app.include_router(build_router())
     if FastAPIInstrumentor and settings.otel_endpoint:
         FastAPIInstrumentor.instrument_app(app)

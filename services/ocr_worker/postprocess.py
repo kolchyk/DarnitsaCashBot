@@ -168,7 +168,8 @@ def _extract_merchant(tokens: Sequence[OcrToken], header_height: int) -> str | N
     if not clusters:
         return None
     candidate = clusters[0].text
-    return _normalize_text(candidate)
+    # Return original text, not normalized (to preserve Ukrainian/Cyrillic text)
+    return candidate.strip()
 
 
 def _extract_purchase_ts(tokens_by_profile: dict[str, list[OcrToken]]):
@@ -233,13 +234,13 @@ def _extract_purchase_ts(tokens_by_profile: dict[str, list[OcrToken]]):
 
 
 def _line_item_from_cluster(cluster: LineCluster, catalog_aliases: dict[str, list[str]]) -> dict[str, Any]:
-    normalized_name = _normalize_text(cluster.text)
-    original_name = cluster.text  # Сохраняем оригинальный текст до нормализации
+    original_name = cluster.text.strip()  # Оригинальный текст (сохраняем как основной)
+    normalized_name = _normalize_text(original_name)  # Нормализованный текст только для поиска SKU
     quantity, price = _extract_quantity_and_price(normalized_name)
     sku_code, score = _match_sku(normalized_name, catalog_aliases)
 
     return {
-        "name": normalized_name,
+        "name": original_name,  # Используем оригинальный текст как основной
         "original_name": original_name,  # Оригинальный текст для поиска кириллицы
         "quantity": quantity,
         "price": price,

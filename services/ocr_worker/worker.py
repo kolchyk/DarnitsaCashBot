@@ -234,17 +234,8 @@ async def _publish_failure(payload: dict, failure_payload: dict) -> None:
     pass
 
 
-async def run_worker() -> None:
-    settings = get_settings()
-    configure_logging(settings.log_level)
-    # RabbitMQ removed - worker no longer consumes from queue
-    # This worker should be called directly or via HTTP endpoint instead
-    while True:
-        await asyncio.sleep(60)  # Placeholder - no longer consuming from queue
-
-
-def run():
-    asyncio.run(run_worker())
+# Worker functions removed - OCR processing is now triggered directly via process_message()
+# This file is kept for backward compatibility but worker loop is no longer needed
 
 
 if __name__ == "__main__":

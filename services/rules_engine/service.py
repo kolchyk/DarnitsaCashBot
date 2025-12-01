@@ -3,11 +3,20 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
+from unidecode import unidecode
+
 from libs.common import configure_logging, get_settings
 from libs.common.analytics import AnalyticsClient
+from libs.common.constants import (
+    DARNITSA_KEYWORDS_CYRILLIC,
+    DARNITSA_KEYWORDS_LATIN,
+    ELIGIBILITY_WINDOW_DAYS,
+    MAX_RECEIPTS_PER_DAY,
+)
 from libs.common.crypto import Encryptor
 from libs.common.portmone import PortmoneDirectClient
 from libs.data import async_session_factory
@@ -15,9 +24,6 @@ from libs.data.models import LineItem, Receipt
 from libs.data.repositories import ReceiptRepository
 
 LOGGER = logging.getLogger(__name__)
-
-ELIGIBILITY_WINDOW_DAYS = 7
-MAX_RECEIPTS_PER_DAY = 3
 
 
 async def evaluate(payload: dict) -> None:
@@ -28,11 +34,10 @@ async def evaluate(payload: dict) -> None:
             return
         ocr_payload = payload.get("ocr_payload") or {}
         
-        # Проверяем, не является ли это ошибкой OCR
+        # Check if this is an OCR error
         if ocr_payload.get("error") or payload.get("status") == "failed":
             receipt.status = "rejected"
             await session.commit()
-            # RabbitMQ removed - decisions are now stored in database only
             return
 
         repo = ReceiptRepository(session)
@@ -40,7 +45,6 @@ async def evaluate(payload: dict) -> None:
         if daily_count > MAX_RECEIPTS_PER_DAY:
             receipt.status = "rejected"
             await session.commit()
-            # RabbitMQ removed - decisions are now stored in database only
             return
 
         purchase_ts = ocr_payload.get("purchase_ts")
@@ -49,36 +53,21 @@ async def evaluate(payload: dict) -> None:
             if receipt.purchase_ts < datetime.now(timezone.utc) - timedelta(days=ELIGIBILITY_WINDOW_DAYS):
                 receipt.status = "rejected"
                 await session.commit()
-                # RabbitMQ removed - decisions are now stored in database only
                 return
 
-        # Принимаем все чеки, которые успешно прошли OCR
-        # Распознаем и сохраняем все товары из чека
+        # Accept all receipts that successfully passed OCR
+        # Recognize and save all products from the receipt
         line_items = ocr_payload.get("line_items", [])
         
-        # Проверяем, что OCR успешно распознал хотя бы один товар
+        # Check that OCR successfully recognized at least one product
         has_items = len(line_items) > 0
         
-        # Проверяем наличие "Дарниця" в названиях товаров
-        # Используем регистронезависимый поиск
-        # Включаем разные падежи и варианты написания на украинском языке
-        DARNITSA_KEYWORDS_CYRILLIC = [
-            # Основные варианты (именительный падеж)
-            "дарниця", "дарница",
-            # Родительный падеж
-            "дарниці",
-            # Винительный падеж
-            "дарницю",
-            # Творительный падеж
-            "дарницею",
-        ]
-        DARNITSA_KEYWORDS_LATIN = [
-            # Латинские варианты (транслитерация через unidecode)
-            "darnitsa", "darnitsia",
-        ]
+        # Check for "Дарниця" in product names
+        # Use case-insensitive search
+        # Include different cases and spelling variants in Ukrainian
         has_darnitsa = False
         
-        # Сохраняем все распознанные товары и проверяем наличие Дарница
+        # Save all recognized products and check for Darnitsa
         LOGGER.info(
             "Evaluating receipt %s: line_items=%d, daily_count=%d/%d",
             receipt_id,
@@ -88,18 +77,19 @@ async def evaluate(payload: dict) -> None:
         )
         
         for item in line_items:
-            # Используем оригинальный текст для поиска кириллицы
-            original_name = item.get("original_name", item.get("name", ""))
-            normalized_name = item.get("name", "")
+            # Get original text (now 'name' contains original text, not normalized)
+            original_name = item.get("name", "")
+            # Normalize for Latin keyword matching if needed
+            normalized_name = unidecode(unicodedata.normalize("NFC", original_name)).upper()
             
             original_lower = original_name.lower()
             normalized_lower = normalized_name.lower()
             
-            # Проверяем наличие Дарница в оригинальном тексте (кириллица)
+            # Check for Darnitsa in original text (Cyrillic)
             if any(keyword in original_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC):
                 has_darnitsa = True
                 LOGGER.debug("Found Darnitsa keyword (cyrillic) in item: '%s'", original_name[:50])
-            # Проверяем в нормализованном тексте (транслитерация)
+            # Check in normalized text (transliteration)
             elif any(keyword in normalized_lower for keyword in DARNITSA_KEYWORDS_LATIN):
                 has_darnitsa = True
                 LOGGER.debug("Found Darnitsa keyword (latin) in item: '%s'", normalized_name[:50])
@@ -111,13 +101,13 @@ async def evaluate(payload: dict) -> None:
             else:
                 price = int(price)
             confidence = float(item.get("confidence", 0))
-            sku_code = item.get("sku_code")  # Используем SKU из OCR, если есть
+            sku_code = item.get("sku_code")  # Use SKU from OCR if available
             
             session.add(
                 LineItem(
                     receipt_id=receipt.id,
                     sku_code=sku_code,
-                    product_name=normalized_name,  # Fixed: use normalized_name instead of undefined 'name'
+                    product_name=original_name,  # Save original text (Ukrainian/Cyrillic) to database
                     quantity=quantity,
                     unit_price=price,
                     total_price=price * quantity,
@@ -125,7 +115,7 @@ async def evaluate(payload: dict) -> None:
                 )
             )
         
-        # Принимаем чек только если найден товар с Дарница
+        # Accept receipt only if Darnitsa product is found
         receipt.status = "accepted" if (has_items and has_darnitsa) else "rejected"
         
         rejection_reason = None
@@ -152,49 +142,20 @@ async def evaluate(payload: dict) -> None:
         
         await session.commit()
         
-        # Trigger bonus payout if receipt was accepted
+        # Publish event if receipt was accepted
         if receipt.status == "accepted":
-            try:
-                from services.bonus_service.main import trigger_payout
-                settings = get_settings()
-                analytics = AnalyticsClient(settings)
-                encryptor = Encryptor()
-                client = PortmoneDirectClient(settings)
-                
-                try:
-                    await trigger_payout(
-                        payload={
-                            "receipt_id": str(receipt_id),
-                            "status": "accepted",
-                        },
-                        analytics=analytics,
-                        client=client,
-                        encryptor=encryptor,
-                        settings=settings,
-                    )
-                finally:
-                    await client.aclose()
-            except Exception as e:
-                LOGGER.error(
-                    f"Failed to trigger payout for receipt {receipt_id}: {type(e).__name__}: {str(e)}",
-                    exc_info=True,
+            event_bus = get_event_bus()
+            await event_bus.publish(
+                Event(
+                    event_type=EVENT_RECEIPT_ACCEPTED,
+                    payload={
+                        "receipt_id": str(receipt_id),
+                        "status": "accepted",
+                    },
                 )
-    # RabbitMQ removed - decisions are now stored in database only
+            )
 
 
-async def run_worker() -> None:
-    settings = get_settings()
-    configure_logging(settings.log_level)
-    # RabbitMQ removed - worker no longer consumes from queue
-    # This worker should be called directly or via HTTP endpoint instead
-    while True:
-        await asyncio.sleep(60)  # Placeholder - no longer consuming from queue
-
-
-def run():
-    asyncio.run(run_worker())
-
-
-if __name__ == "__main__":
-    run()
+# Worker functions removed - rules evaluation is now triggered directly via evaluate()
+# This file is kept for backward compatibility but worker loop is no longer needed
 

@@ -40,6 +40,7 @@ class AppSettings(BaseSettings):
     postgres_db: str = Field(default="darnitsa_cashbot", alias="POSTGRES_DB")
     postgres_user: str = Field(default="darnitsa", alias="POSTGRES_USER")
     postgres_password: str = Field(default="darnitsa", alias="POSTGRES_PASSWORD")
+    postgres_ssl_mode: str = Field(default="prefer", alias="POSTGRES_SSL_MODE")
     
     @model_validator(mode="after")
     def parse_heroku_database_url(self):

@@ -12,6 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
 from libs.common.analytics import AnalyticsClient
+from libs.common.constants import (
+    DARNITSA_KEYWORDS_CYRILLIC,
+    DARNITSA_KEYWORDS_LATIN,
+    MAX_FILE_SIZE,
+    SUPPORTED_CONTENT_TYPES,
+)
 from libs.common.rate_limit import RateLimiter
 from libs.common.storage import StorageClient
 from libs.data.models import LineItem, Receipt
@@ -37,8 +43,129 @@ router = APIRouter()
 
 logger = logging.getLogger(__name__)
 
-MAX_FILE_SIZE = 10 * 1024 * 1024
-SUPPORTED_CONTENT_TYPES = {"image/jpeg", "image/png"}
+
+async def _validate_upload_file(file: UploadFile) -> None:
+    """Validate uploaded file size and content type."""
+    if file.content_type not in SUPPORTED_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+
+async def _upload_receipt_to_storage(
+    storage: StorageClient,
+    file: UploadFile,
+    user_id: UUID,
+    telegram_id: int,
+) -> tuple[str, str]:
+    """Upload receipt file to storage and return object key and checksum."""
+    data = await file.read()
+    if len(data) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail="File exceeds 10MB limit")
+    
+    checksum = hashlib.sha256(data).hexdigest()
+    object_key = f"receipts/{user_id}/{uuid4()}.{file.filename.split('.')[-1]}"
+    
+    try:
+        await storage.upload_bytes(
+            key=object_key,
+            content=data,
+            content_type=file.content_type or "image/jpeg",
+        )
+    except RuntimeError as e:
+        logger.error(
+            f"Storage upload failed for user {telegram_id}: {str(e)}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Storage service temporarily unavailable. Please try again later.",
+        ) from e
+    except Exception as e:
+        logger.error(
+            f"Unexpected storage error for user {telegram_id}: {type(e).__name__}: {str(e)}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to upload receipt. Please try again later.",
+        ) from e
+    
+    return object_key, checksum
+
+
+async def _create_receipt_record(
+    session: AsyncSession,
+    receipt_repo: ReceiptRepository,
+    user_id: UUID,
+    object_key: str,
+    checksum: str,
+    telegram_id: int,
+) -> Receipt:
+    """Create receipt record in database."""
+    try:
+        receipt = await receipt_repo.create_receipt(
+            user_id=user_id,
+            upload_ts=datetime.now(timezone.utc),
+            storage_object_key=object_key,
+            checksum=checksum,
+        )
+        await session.commit()
+        return receipt
+    except Exception as e:
+        await session.rollback()
+        logger.error(
+            f"Failed to create receipt record for user {telegram_id}: {type(e).__name__}: {str(e)}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Receipt uploaded but failed to process. Please contact support.",
+        ) from e
+
+
+def _filter_darnitsa_products(
+    line_items: list[LineItem],
+    ocr_payload: dict | None,
+) -> list[DarnitsaProduct]:
+    """Filter Darnitsa products from line items."""
+    darnitsa_products: list[DarnitsaProduct] = []
+    
+    if not ocr_payload or not isinstance(ocr_payload, dict):
+        return darnitsa_products
+    
+    ocr_line_items = ocr_payload.get("line_items", [])
+    ocr_name_map = {
+        item.get("name", ""): item.get("original_name", item.get("name", ""))
+        for item in ocr_line_items
+    }
+    
+    for item in line_items:
+        name_lower = item.product_name.lower()
+        # Check normalized name (transliteration)
+        found = any(keyword in name_lower for keyword in DARNITSA_KEYWORDS_LATIN)
+        
+        # If not found, check original name from OCR payload
+        if not found and ocr_name_map:
+            original_name = ocr_name_map.get(item.product_name, "")
+            if original_name:
+                original_lower = original_name.lower()
+                found = any(keyword in original_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC)
+        
+        if found:
+            # Convert price from kopecks to UAH
+            price_uah = item.unit_price / 100.0
+            # Use original name if available, otherwise normalized name
+            display_name = ocr_name_map.get(item.product_name, item.product_name)
+            if not display_name or display_name == item.product_name:
+                display_name = item.product_name
+            darnitsa_products.append(
+                DarnitsaProduct(
+                    name=display_name,
+                    price=price_uah,
+                    quantity=item.quantity,
+                )
+            )
+    
+    return darnitsa_products
 
 
 @router.post("/users", response_model=UserResponse)
@@ -46,6 +173,7 @@ async def upsert_user(
     payload: UserUpsertRequest,
     session: AsyncSession = Depends(get_session_dep),
 ):
+    """Create or update a user."""
     try:
         user_repo = UserRepository(session)
         user = await user_repo.upsert_user(
@@ -60,65 +188,19 @@ async def upsert_user(
             locale=user.locale,
             has_phone=bool(user.phone_number),
         )
-    except IntegrityError as e:
-        await session.rollback()
-        logger.error(
-            f"Database integrity error while upserting user: telegram_id={payload.telegram_id}, "
-            f"error={str(e)}",
-            exc_info=True,
-        )
-        # Check if it's a unique constraint violation (duplicate telegram_id)
-        if "unique" in str(e).lower() or "duplicate" in str(e).lower():
-            raise HTTPException(
-                status_code=409,
-                detail=f"User with telegram_id {payload.telegram_id} already exists",
-            ) from e
-        raise HTTPException(
-            status_code=400,
-            detail="Database constraint violation",
-        ) from e
     except ValueError as e:
+        # Encryption/decryption errors raise ValueError
         await session.rollback()
         logger.error(
-            f"Value error while upserting user: telegram_id={payload.telegram_id}, "
-            f"error={str(e)}",
+            f"Encryption error while upserting user: telegram_id={payload.telegram_id}, error={str(e)}",
             exc_info=True,
         )
-        # Likely an encryption error
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error during user registration",
-        ) from e
-    except SQLAlchemyError as e:
-        await session.rollback()
-        error_msg = str(e)
-        error_type = type(e).__name__
-        logger.error(
-            f"Database error while upserting user: telegram_id={payload.telegram_id}, "
-            f"error_type={error_type}, error={error_msg}",
-            exc_info=True,
-        )
-        # Include more details in response for debugging (can be removed in production)
-        detail_msg = f"Database error occurred: {error_type}"
-        if "connection" in error_msg.lower() or "connect" in error_msg.lower():
-            detail_msg += " - Database connection issue"
-        elif "relation" in error_msg.lower() or "table" in error_msg.lower() or "does not exist" in error_msg.lower():
-            detail_msg += " - Table or relation does not exist (migrations may be needed)"
-        raise HTTPException(
-            status_code=500,
-            detail=detail_msg,
-        ) from e
+        raise EncryptionError(f"Encryption error: {str(e)}", payload.telegram_id) from e
     except Exception as e:
+        # Let SQLAlchemy errors be handled by the exception handler
         await session.rollback()
-        logger.error(
-            f"Unexpected error while upserting user: telegram_id={payload.telegram_id}, "
-            f"error_type={type(e).__name__}, error={str(e)}",
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Internal server error",
-        ) from e
+        # Re-raise to let exception handlers process it
+        raise
 
 
 @router.post("/receipts", response_model=ReceiptUploadResponse)
@@ -131,67 +213,33 @@ async def upload_receipt(
     analytics: AnalyticsClient = Depends(get_analytics),
     limiter: RateLimiter = Depends(get_receipt_rate_limiter),
 ):
+    """Upload a receipt image for processing."""
+    # Check user exists
     user_repo = UserRepository(session)
     user = await user_repo.get_by_telegram(telegram_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if file.content_type not in SUPPORTED_CONTENT_TYPES:
-        raise HTTPException(status_code=400, detail="Unsupported file type")
-    data = await file.read()
-    if len(data) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=413, detail="File exceeds 10MB limit")
-
+    
+    # Validate file
+    await _validate_upload_file(file)
+    
+    # Check rate limit
     allowed = await limiter.check(str(telegram_id))
     if not allowed:
         raise HTTPException(status_code=429, detail="Too many uploads. Please wait a minute.")
-
-    checksum = hashlib.sha256(data).hexdigest()
-    object_key = f"receipts/{user.id}/{uuid4()}.{file.filename.split('.')[-1]}"
     
-    try:
-        await storage.upload_bytes(key=object_key, content=data, content_type=file.content_type or "image/jpeg")
-    except RuntimeError as e:
-        await session.rollback()
-        logger.error(
-            f"Storage upload failed for user {telegram_id}: {str(e)}",
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=503,
-            detail="Storage service temporarily unavailable. Please try again later.",
-        ) from e
-    except Exception as e:
-        await session.rollback()
-        logger.error(
-            f"Unexpected storage error for user {telegram_id}: {type(e).__name__}: {str(e)}",
-            exc_info=True,
-        )
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to upload receipt. Please try again later.",
-        ) from e
-
+    # Upload to storage
+    object_key, checksum = await _upload_receipt_to_storage(
+        storage, file, user.id, telegram_id
+    )
+    
+    # Create receipt record
     receipt_repo = ReceiptRepository(session)
-    try:
-        receipt = await receipt_repo.create_receipt(
-            user_id=user.id,
-            upload_ts=datetime.now(timezone.utc),
-            storage_object_key=object_key,
-            checksum=checksum,
-        )
-        await session.commit()
-    except Exception as e:
-        await session.rollback()
-        logger.error(
-            f"Failed to create receipt record for user {telegram_id}: {type(e).__name__}: {str(e)}",
-            exc_info=True,
-        )
-        # Note: File was uploaded but receipt record failed - this is a partial failure
-        raise HTTPException(
-            status_code=500,
-            detail="Receipt uploaded but failed to process. Please contact support.",
-        ) from e
-
+    receipt = await _create_receipt_record(
+        session, receipt_repo, user.id, object_key, checksum, telegram_id
+    )
+    
+    # Record analytics event
     payload = {
         "receipt_id": str(receipt.id),
         "user_id": str(user.id),
@@ -230,7 +278,12 @@ async def get_receipt_status(
     receipt_id: UUID,
     session: AsyncSession = Depends(get_session_dep),
 ):
-    stmt = select(Receipt).where(Receipt.id == receipt_id)
+    # Load receipt with line items preloaded to avoid N+1 queries
+    stmt = (
+        select(Receipt)
+        .options(selectinload(Receipt.line_items))
+        .where(Receipt.id == receipt_id)
+    )
     result = await session.execute(stmt)
     receipt = result.scalar_one_or_none()
     if not receipt:
@@ -244,53 +297,13 @@ async def get_receipt_status(
             await session.commit()
             return ReceiptResponse(receipt_id=receipt.id, status="rejected")
     
-    # Load line items and filter Darnitsa products
+    # Filter Darnitsa products from preloaded line items
     darnitsa_products: list[DarnitsaProduct] = []
     if receipt.status in ("processing", "accepted"):
-        # Keywords for identifying Darnitsa products (same as in rules_engine)
-        DARNITSA_KEYWORDS_CYRILLIC = [
-            "дарниця", "дарница", "дарниці", "дарницю", "дарницею",
-        ]
-        DARNITSA_KEYWORDS_LATIN = [
-            "darnitsa", "darnitsia",  # транслитерация через unidecode
-        ]
-        
-        line_items_stmt = select(LineItem).where(LineItem.receipt_id == receipt_id)
-        line_items_result = await session.execute(line_items_stmt)
-        line_items = line_items_result.scalars().all()
-        
-        # Также проверяем OCR payload для оригинального текста
-        ocr_payload = receipt.ocr_payload
-        ocr_line_items = ocr_payload.get("line_items", []) if isinstance(ocr_payload, dict) else []
-        ocr_name_map = {item.get("name", ""): item.get("original_name", item.get("name", "")) 
-                        for item in ocr_line_items}
-        
-        for item in line_items:
-            name_lower = item.product_name.lower()
-            # Проверяем нормализованное имя (транслитерация)
-            found = any(keyword in name_lower for keyword in DARNITSA_KEYWORDS_LATIN)
-            
-            # Если не найдено, проверяем оригинальное имя из OCR payload
-            if not found and ocr_name_map:
-                original_name = ocr_name_map.get(item.product_name, "")
-                if original_name:
-                    original_lower = original_name.lower()
-                    found = any(keyword in original_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC)
-            
-            if found:
-                # Convert price from kopecks to UAH
-                price_uah = item.unit_price / 100.0
-                # Используем оригинальное название, если доступно, иначе нормализованное
-                display_name = ocr_name_map.get(item.product_name, item.product_name)
-                if not display_name or display_name == item.product_name:
-                    display_name = item.product_name
-                darnitsa_products.append(
-                    DarnitsaProduct(
-                        name=display_name,
-                        price=price_uah,
-                        quantity=item.quantity,
-                    )
-                )
+        darnitsa_products = _filter_darnitsa_products(
+            receipt.line_items,
+            receipt.ocr_payload,
+        )
     
     # Commit read-only transaction to avoid ROLLBACK log noise
     await session.commit()
