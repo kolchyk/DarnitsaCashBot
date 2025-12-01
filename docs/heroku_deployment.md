@@ -64,9 +64,17 @@ heroku addons:create heroku-redis:mini
 ```
 
 #### Хранилище (S3-совместимое)
-Для хранения файлов чеков можно использовать:
-- AWS S3 (рекомендуется)
-- MinIO (для разработки)
+Для хранения файлов чеков можно использовать различные S3-совместимые провайдеры:
+- **Cloudflare R2** (рекомендуется) - бесплатный egress, низкая стоимость
+- **Backblaze B2** - самый дешевый вариант
+- **DigitalOcean Spaces** - простой и предсказуемый
+- **AWS S3** - стандарт индустрии
+- **Scaleway Object Storage** - для европейских проектов
+- **Wasabi** - низкая стоимость без egress fees
+- **Stackhero MinIO** - управляемый MinIO как Heroku addon
+- **MinIO** - для локальной разработки
+
+📖 **Подробное сравнение и инструкции:** см. [Storage Alternatives](storage_alternatives.md)
 
 ### 4. Настройка переменных окружения
 
@@ -83,11 +91,28 @@ heroku config:set TELEGRAM_WEBHOOK_URL=https://your-app-name.herokuapp.com/webho
 # URL API Gateway (используется ботом для подключения к API)
 heroku config:set API_GATEWAY_URL=https://your-app-name.herokuapp.com
 
-# Хранилище (S3)
-heroku config:set STORAGE_ENDPOINT=https://s3.amazonaws.com
+# Хранилище (S3-совместимое)
+# Для AWS S3 endpoint можно не указывать (оставить пустым) или использовать региональный endpoint
+# Для других провайдеров (Cloudflare R2, Backblaze B2, DigitalOcean Spaces и т.д.) укажите их endpoint
+heroku config:set STORAGE_ENDPOINT=https://s3.amazonaws.com  # или endpoint вашего провайдера
 heroku config:set STORAGE_BUCKET=your-bucket-name
 heroku config:set STORAGE_ACCESS_KEY=your-access-key
 heroku config:set STORAGE_SECRET_KEY=your-secret-key
+heroku config:set STORAGE_REGION=us-east-1  # регион вашего провайдера
+
+# Пример для Cloudflare R2 (рекомендуется):
+# heroku config:set STORAGE_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+# heroku config:set STORAGE_BUCKET=your-bucket-name
+# heroku config:set STORAGE_ACCESS_KEY=your-r2-access-key-id
+# heroku config:set STORAGE_SECRET_KEY=your-r2-secret-access-key
+# heroku config:set STORAGE_REGION=auto
+
+# Пример для Backblaze B2:
+# heroku config:set STORAGE_ENDPOINT=https://s3.us-west-004.backblazeb2.com
+# heroku config:set STORAGE_BUCKET=your-bucket-name
+# heroku config:set STORAGE_ACCESS_KEY=your-b2-key-id
+# heroku config:set STORAGE_SECRET_KEY=your-b2-application-key
+# heroku config:set STORAGE_REGION=us-west-004
 
 # Portmone настройки
 heroku config:set PORTMONE_LOGIN=your_login

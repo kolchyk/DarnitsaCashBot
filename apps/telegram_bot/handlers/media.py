@@ -29,7 +29,7 @@ async def handle_receipt_photo(message: Message, receipt_client: ReceiptApiClien
         filename=f"receipt-{uuid4()}.jpg",
         content_type="image/jpeg",
     )
-    status_translated = translate_status(response["status"])
+    status_translated = translate_status(response["receipt"]["status"])
     await message.answer(
         f"Чек отримано. Виплата PortmoneDirect почнеться після підтвердження. Поточний статус: {status_translated}"
     )
