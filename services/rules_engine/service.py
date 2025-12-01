@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from libs.common import configure_logging, get_settings
+from libs.common.analytics import AnalyticsClient
+from libs.common.crypto import Encryptor
+from libs.common.portmone import PortmoneDirectClient
 from libs.data import async_session_factory
 from libs.data.models import LineItem, Receipt
 from libs.data.repositories import ReceiptRepository
+
+LOGGER = logging.getLogger(__name__)
 
 ELIGIBILITY_WINDOW_DAYS = 7
 MAX_RECEIPTS_PER_DAY = 3
@@ -53,9 +59,32 @@ async def evaluate(payload: dict) -> None:
         # Проверяем, что OCR успешно распознал хотя бы один товар
         has_items = len(line_items) > 0
         
-        # Сохраняем все распознанные товары
+        # Проверяем наличие "Дарниця" в названиях товаров
+        # Используем регистронезависимый поиск
+        # Включаем разные падежи и варианты написания на украинском языке
+        DARNITSA_KEYWORDS = [
+            # Основные варианты (именительный падеж)
+            "дарниця", "дарница",
+            # Родительный падеж
+            "дарниці",
+            # Винительный падеж
+            "дарницю",
+            # Творительный падеж
+            "дарницею",
+            # Латинские варианты
+            "darnitsa",
+        ]
+        has_darnitsa = False
+        
+        # Сохраняем все распознанные товары и проверяем наличие Дарница
         for item in line_items:
             name = item.get("name", "")
+            name_lower = name.lower()
+            
+            # Проверяем наличие Дарница в названии товара (регистронезависимо)
+            if any(keyword in name_lower for keyword in DARNITSA_KEYWORDS):
+                has_darnitsa = True
+            
             quantity = int(item.get("quantity", 1))
             price = item.get("price")
             if price is None:
@@ -77,9 +106,37 @@ async def evaluate(payload: dict) -> None:
                 )
             )
         
-        # Принимаем чек, если OCR успешно распознал товары
-        receipt.status = "accepted" if has_items else "rejected"
+        # Принимаем чек только если найден товар с Дарница
+        receipt.status = "accepted" if (has_items and has_darnitsa) else "rejected"
         await session.commit()
+        
+        # Trigger bonus payout if receipt was accepted
+        if receipt.status == "accepted":
+            try:
+                from services.bonus_service.main import trigger_payout
+                settings = get_settings()
+                analytics = AnalyticsClient(settings)
+                encryptor = Encryptor()
+                client = PortmoneDirectClient(settings)
+                
+                try:
+                    await trigger_payout(
+                        payload={
+                            "receipt_id": str(receipt_id),
+                            "status": "accepted",
+                        },
+                        analytics=analytics,
+                        client=client,
+                        encryptor=encryptor,
+                        settings=settings,
+                    )
+                finally:
+                    await client.aclose()
+            except Exception as e:
+                LOGGER.error(
+                    f"Failed to trigger payout for receipt {receipt_id}: {type(e).__name__}: {str(e)}",
+                    exc_info=True,
+                )
     # RabbitMQ removed - decisions are now stored in database only
 
 

@@ -91,7 +91,18 @@ async def process_message(payload: dict) -> None:
         receipt.status = ReceiptStatus.PROCESSING
         await session.commit()
 
-    # RabbitMQ removed - OCR results are now stored in database only
+    # Trigger rules engine evaluation after OCR completes successfully
+    try:
+        from services.rules_engine.service import evaluate
+        await evaluate({
+            "receipt_id": str(receipt_id),
+            "ocr_payload": structured_payload,
+        })
+    except Exception as e:
+        LOGGER.error(
+            f"Failed to evaluate receipt {receipt_id} in rules engine: {type(e).__name__}: {str(e)}",
+            exc_info=True,
+        )
 
 
 def _run_tesseract(preprocess_result: PreprocessResult, settings):

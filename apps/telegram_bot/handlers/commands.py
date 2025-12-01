@@ -28,7 +28,11 @@ async def cmd_start(message: Message, receipt_client: ReceiptApiClient):
             locale="uk",
         )
         has_phone = bool(user_info.get("has_phone"))
-        reply_markup = contact_keyboard() if not has_phone else ReplyKeyboardRemove()
+        if not has_phone:
+            reply_markup = contact_keyboard()
+        else:
+            # Показываем основное меню после успешной регистрации
+            reply_markup = main_menu_keyboard()
         user_name = message.from_user.first_name or ""
         await message.answer(
             onboarding_text(require_phone=not has_phone, user_name=user_name),
@@ -48,7 +52,17 @@ async def cmd_start(message: Message, receipt_client: ReceiptApiClient):
 async def cmd_help(message: Message):
     await message.answer(
         "Надішліть фото чеку з продуктами Дарниця, щоб отримати бонус 1₴. "
-        "Скористайтеся /history, щоб переглянути історію, або /change_phone для оновлення номера."
+        "Скористайтеся /history, щоб переглянути історію.",
+        reply_markup=main_menu_keyboard(),
+    )
+
+
+@router.message(Command("menu"))
+async def cmd_menu(message: Message):
+    """Показать главное меню"""
+    await message.answer(
+        "Головне меню:",
+        reply_markup=main_menu_keyboard(),
     )
 
 
@@ -56,7 +70,7 @@ async def cmd_help(message: Message):
 async def cmd_history(message: Message, receipt_client: ReceiptApiClient):
     history = await receipt_client.fetch_history(telegram_id=message.from_user.id)
     if not history:
-        await message.answer("Ще не надсилали жодного чеку.")
+        await message.answer("Ще не надсилали жодного чеку.", reply_markup=main_menu_keyboard())
         return
     lines = [
         f"Останні {len(history)} чеки:",
@@ -69,12 +83,24 @@ async def cmd_history(message: Message, receipt_client: ReceiptApiClient):
         lines.append(
             f"- {status_translated} @ {item['uploaded_at']} (Portmone: {reference}, статус: {payout_status_translated})"
         )
-    await message.answer("\n".join(lines))
+    await message.answer("\n".join(lines), reply_markup=main_menu_keyboard())
 
 
 @router.message(Command("change_phone"))
 async def cmd_change_phone(message: Message):
     await message.answer(phone_prompt_text(), reply_markup=contact_keyboard())
+
+
+@router.message(F.text == "📋 Історія чеків")
+async def handle_menu_history(message: Message, receipt_client: ReceiptApiClient):
+    """Обработчик кнопки меню 'История чеков'"""
+    await cmd_history(message, receipt_client)
+
+
+@router.message(F.text == "ℹ️ Допомога")
+async def handle_menu_help(message: Message):
+    """Обработчик кнопки меню 'Помощь'"""
+    await cmd_help(message)
 
 
 @router.message(F.contact)
@@ -85,7 +111,7 @@ async def handle_contact(message: Message, receipt_client: ReceiptApiClient):
         locale="uk",
     )
     if user_info.get("has_phone"):
-        await message.answer(contact_saved_text(), reply_markup=ReplyKeyboardRemove())
+        await message.answer(contact_saved_text(), reply_markup=main_menu_keyboard())
         return
     await message.answer(phone_prompt_text(), reply_markup=contact_keyboard())
 
@@ -109,10 +135,27 @@ def onboarding_text(*, require_phone: bool, user_name: str = "") -> str:
 
 
 def contact_keyboard() -> ReplyKeyboardMarkup:
+    """Клавиатура для запроса контакта"""
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="Поділитися номером телефону", request_contact=True)]],
         resize_keyboard=True,
         one_time_keyboard=True,
+    )
+
+
+def main_menu_keyboard() -> ReplyKeyboardMarkup:
+    """Главное меню бота - постоянная клавиатура внизу экрана"""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="📋 Історія чеків"),
+            ],
+            [
+                KeyboardButton(text="ℹ️ Допомога"),
+            ],
+        ],
+        resize_keyboard=True,
+        input_field_placeholder="Надішліть фото чека або виберіть дію",
     )
 
 

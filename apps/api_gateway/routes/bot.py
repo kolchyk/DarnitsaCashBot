@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -120,6 +120,7 @@ async def upsert_user(
 async def upload_receipt(
     telegram_id: int,
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
     session: AsyncSession = Depends(get_session_dep),
     storage: StorageClient = Depends(get_storage_client),
     analytics: AnalyticsClient = Depends(get_analytics),
@@ -194,6 +195,23 @@ async def upload_receipt(
         "telegram_id": telegram_id,
     }
     await analytics.record("receipt_uploaded", payload)
+    
+    # Trigger OCR processing in background
+    async def process_ocr():
+        try:
+            from services.ocr_worker.worker import process_message
+            await process_message({
+                "receipt_id": str(receipt.id),
+                "storage_key": object_key,
+            })
+        except Exception as e:
+            logger.error(
+                f"Failed to process OCR for receipt {receipt.id}: {type(e).__name__}: {str(e)}",
+                exc_info=True,
+            )
+    
+    background_tasks.add_task(process_ocr)
+    
     return ReceiptUploadResponse(
         receipt=ReceiptResponse(receipt_id=receipt.id, status=receipt.status),
         queue_reference="receipts.incoming",
