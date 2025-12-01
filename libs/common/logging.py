@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 from contextvars import ContextVar
 from typing import Any
@@ -18,6 +19,8 @@ def get_correlation_id() -> str | None:
 
 
 def configure_logging(level: str = "INFO") -> None:
+    """Configure both loguru and standard logging to output to stdout."""
+    # Configure loguru
     logger.remove()
     logger.add(
         sys.stdout,
@@ -26,6 +29,27 @@ def configure_logging(level: str = "INFO") -> None:
         enqueue=True,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | {level} | {message} | {extra}",
     )
+    
+    # Configure standard logging module to output to stdout
+    # This ensures all logging.getLogger() calls work properly
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, level.upper(), logging.INFO))
+    
+    # Remove existing handlers to avoid duplicates
+    root_logger.handlers.clear()
+    
+    # Create a stream handler that outputs to stdout
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setLevel(getattr(logging, level.upper(), logging.INFO))
+    
+    # Use a simple format that matches loguru's style
+    formatter = logging.Formatter(
+        fmt="%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    handler.setFormatter(formatter)
+    
+    root_logger.addHandler(handler)
 
 
 def log_extra() -> dict[str, Any]:
