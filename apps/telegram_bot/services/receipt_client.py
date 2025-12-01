@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class ReceiptApiClient:
@@ -10,7 +13,10 @@ class ReceiptApiClient:
 
     def __init__(self, base_url: str = "http://localhost:8000") -> None:
         self.base_url = base_url.rstrip("/")
-        self._client = httpx.AsyncClient(base_url=self.base_url)
+        self._client = httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=10.0,
+        )
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -18,16 +24,26 @@ class ReceiptApiClient:
     async def register_user(
         self, *, telegram_id: int, phone_number: str | None, locale: str
     ) -> dict[str, Any]:
-        response = await self._client.post(
-            "/bot/users",
-            json={
-                "telegram_id": telegram_id,
-                "phone_number": phone_number,
-                "locale": locale,
-            },
-        )
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = await self._client.post(
+                "/bot/users",
+                json={
+                    "telegram_id": telegram_id,
+                    "phone_number": phone_number,
+                    "locale": locale,
+                },
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.ConnectError as e:
+            logger.error(f"Failed to connect to API Gateway at {self.base_url}: {e}")
+            raise ConnectionError(f"API Gateway недоступен по адресу {self.base_url}. Убедитесь, что API Gateway запущен.") from e
+        except httpx.TimeoutException as e:
+            logger.error(f"Timeout connecting to API Gateway: {e}")
+            raise TimeoutError("Превышено время ожидания ответа от API Gateway.") from e
+        except httpx.HTTPStatusError as e:
+            logger.error(f"API Gateway returned error status {e.response.status_code}: {e.response.text}")
+            raise
 
     async def upload_receipt(
         self,
