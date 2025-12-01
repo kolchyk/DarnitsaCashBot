@@ -192,8 +192,10 @@ def run():
     import uvicorn
 
     port = int(os.environ.get("PORT", 8000))
-    reload = os.environ.get("APP_ENV", "local") == "local"
-    uvicorn.run("apps.api_gateway.main:app", host="0.0.0.0", port=port, reload=reload)
+    app_env = os.environ.get("APP_ENV", "").lower()
+    reload = app_env == "local"
+    target_app = "apps.api_gateway.main:app" if reload else app
+    uvicorn.run(target_app, host="0.0.0.0", port=port, reload=reload)
 
 
 if __name__ == "__main__":
