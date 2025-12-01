@@ -16,10 +16,8 @@ async def get_settings_dep() -> AppSettings:
     return get_settings()
 
 
-async def get_session_dep() -> AsyncIterator[AsyncSession]:
-    """Dependency that provides database session."""
-    async for session in get_async_session():
-        yield session
+# Use get_async_session directly as the dependency
+get_session_dep = get_async_session
 
 
 def get_storage_client(settings: AppSettings = Depends(get_settings_dep)) -> StorageClient:

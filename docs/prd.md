@@ -6,7 +6,7 @@
 - **Primary users**: Retail customers purchasing Darnitsa products in Ukrainian pharmacies; internal support/marketing analysts.
 - **Target release**: MVP within 6 weeks, focusing on Ukrainian market and top-3 mobile operators.
 
-**MVP scope**: This iteration is expressly about proving that the intake → OCR (see `OCR.md`) → rules → PortmoneDirect payout flow described in `easy.md` works reliably for a representative set of receipts. Anything beyond that validation is documented as future or optional work and should not block this release.
+**MVP scope**: This iteration is expressly about proving that the intake → OCR (see `OCR.md`) → rules → PortmoneDirect payout flow described in `portmone_setup.md` works reliably for a representative set of receipts. Anything beyond that validation is documented as future or optional work and should not block this release.
 
 ### 1.1 Goals
 1. Demonstrate automated validation of Darnitsa receipts received via Telegram with ≥95% precision on the curated MVP dataset.

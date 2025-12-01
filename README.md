@@ -65,7 +65,7 @@ poetry run python -m apps.telegram_bot.main
 
 1. Скопіюйте змінні `PORTMONE_*` з `env.example` (якщо є) та оновіть їх з обліковими даними та TLS-сертифікатом, виданим PortmoneDirect.
 
-2. **Налаштування авторизації**: Детальна інструкція з налаштування авторизації Portmone API доступна в [docs/portmone_auth.md](docs/portmone_auth.md).
+2. **Налаштування Portmone API**: Повне керівництво з налаштування Portmone Direct API для поповнення мобільного телефона доступне в [docs/portmone_setup.md](docs/portmone_setup.md).
 
 3. **Перевірка підключення**: Використовуйте скрипт `python scripts/check_portmone_api.py` для перевірки підключення до API та коректності облікових даних.
 
@@ -199,8 +199,7 @@ heroku run python -c "import os; print('TESSDATA_PREFIX:', os.environ.get('TESSD
 
 - [PRD](docs/prd.md) — Product Requirements Document
 - [OCR](docs/OCR.md) — Документація по OCR обробці
-- [Portmone Auth](docs/portmone_auth.md) — Налаштування авторизації Portmone
-- [Portmone Quickstart](docs/portmone_quickstart.md) — Швидкий старт з Portmone
+- [Portmone Setup](docs/portmone_setup.md) — Повне керівництво з налаштування Portmone Direct API для поповнення мобільного телефона
 - [Telegram Flow](docs/telegram_flow.md) — Опис потоку роботи з Telegram
 - [Heroku Database Inspection](docs/heroku_database_inspection.md) — Робота з базою даних на Heroku
 
