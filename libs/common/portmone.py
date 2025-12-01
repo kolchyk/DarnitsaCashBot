@@ -6,22 +6,52 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from prometheus_client import Counter, Histogram
+from prometheus_client import Counter, Histogram, REGISTRY
 
 from libs.common import AppSettings, get_settings
 from libs.common.xml_utils import XMLParseError, flatten_xml, parse_xml_document
 
-PORTMONE_REQUEST_TOTAL = Counter(
+
+# Prometheus metrics - created once, reused if module reloads
+def _get_or_create_counter(name, documentation, labelnames):
+    """Get existing Counter from registry or create a new one."""
+    try:
+        return Counter(name, documentation, labelnames)
+    except ValueError:
+        # Metric already exists, find and return it
+        # Search through all collectors to find the one with matching name
+        for collector in list(REGISTRY._collector_to_names.keys()):
+            if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Counter):
+                return collector
+        # If not found, raise the original error
+        raise
+
+
+def _get_or_create_histogram(name, documentation, labelnames, buckets):
+    """Get existing Histogram from registry or create a new one."""
+    try:
+        return Histogram(name, documentation, labelnames, buckets=buckets)
+    except ValueError:
+        # Metric already exists, find and return it
+        # Search through all collectors to find the one with matching name
+        for collector in list(REGISTRY._collector_to_names.keys()):
+            if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Histogram):
+                return collector
+        # If not found, raise the original error
+        raise
+
+
+PORTMONE_REQUEST_TOTAL = _get_or_create_counter(
     "portmone_request_total",
     "Total PortmoneDirect requests",
     ["method", "status"],
 )
-PORTMONE_FAIL_TOTAL = Counter(
+PORTMONE_FAIL_TOTAL = _get_or_create_counter(
     "portmone_fail_total",
     "Failed PortmoneDirect requests grouped by error code",
     ["method", "code"],
 )
-PORTMONE_REQUEST_LATENCY = Histogram(
+PORTMONE_REQUEST_LATENCY = _get_or_create_histogram(
     "portmone_request_latency_seconds",
     "Latency for PortmoneDirect requests",
     ["method"],

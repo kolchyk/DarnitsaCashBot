@@ -36,11 +36,41 @@ from .exceptions import (
 from .routes import router as api_router
 
 
-# Prometheus metrics - created once at module load time
-REQUEST_COUNT = Counter(
-    "api_requests_total", "Total API requests", ["method", "path", "status"]
+# Prometheus metrics - created once, reused if module reloads
+def _get_or_create_counter(name, documentation, labelnames):
+    """Get existing Counter from registry or create a new one."""
+    try:
+        return Counter(name, documentation, labelnames)
+    except ValueError:
+        # Metric already exists, find and return it
+        # Search through all collectors to find the one with matching name
+        for collector in list(REGISTRY._collector_to_names.keys()):
+            if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Counter):
+                return collector
+        # If not found, raise the original error
+        raise
+
+
+def _get_or_create_histogram(name, documentation, labelnames, buckets):
+    """Get existing Histogram from registry or create a new one."""
+    try:
+        return Histogram(name, documentation, labelnames, buckets=buckets)
+    except ValueError:
+        # Metric already exists, find and return it
+        # Search through all collectors to find the one with matching name
+        for collector in list(REGISTRY._collector_to_names.keys()):
+            if hasattr(collector, '_name') and collector._name == name and isinstance(collector, Histogram):
+                return collector
+        # If not found, raise the original error
+        raise
+
+
+REQUEST_COUNT = _get_or_create_counter(
+    "api_requests_total",
+    "Total API requests",
+    ["method", "path", "status"]
 )
-REQUEST_LATENCY = Histogram(
+REQUEST_LATENCY = _get_or_create_histogram(
     "api_request_latency_seconds",
     "API request latency",
     ["method", "path"],
