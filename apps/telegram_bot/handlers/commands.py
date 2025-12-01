@@ -6,7 +6,7 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 
-from libs.common.i18n import get_translator
+from libs.common.i18n import get_translator, translate_status
 
 from ..services import ReceiptApiClient
 
@@ -70,14 +70,16 @@ async def cmd_history(message: Message, receipt_client: ReceiptApiClient):
     for item in history:
         reference = item.get("payout_reference") or "-"
         payout_status = item.get("payout_status") or "-"
+        status_translated = translate_status(_, item["status"])
+        payout_status_translated = translate_status(_, payout_status) if payout_status != "-" else "-"
         lines.append(
             _(
                 "- {status} @ {uploaded_at} (Portmone bill: {reference}, payout: {payout_status})"
             ).format(
-                status=item["status"],
+                status=status_translated,
                 uploaded_at=item["uploaded_at"],
                 reference=reference,
-                payout_status=payout_status,
+                payout_status=payout_status_translated,
             )
         )
     await message.answer("\n".join(lines))

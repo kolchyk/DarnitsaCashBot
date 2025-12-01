@@ -16,3 +16,10 @@ def get_translator(locale: str):
         translation = gettext.translation("bot", localedir=str(LOCALES_PATH), languages=["uk"], fallback=True)
     return translation.gettext
 
+
+def translate_status(_, status: str) -> str:
+    """Translate receipt status to Ukrainian."""
+    if not status or status == "-":
+        return status
+    return _(status)
+

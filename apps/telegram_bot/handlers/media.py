@@ -5,7 +5,7 @@ from uuid import uuid4
 from aiogram import F, Router
 from aiogram.types import Message
 
-from libs.common.i18n import get_translator
+from libs.common.i18n import get_translator, translate_status
 
 from ..services import ReceiptApiClient
 
@@ -30,10 +30,11 @@ async def handle_receipt_photo(message: Message, receipt_client: ReceiptApiClien
         filename=f"receipt-{uuid4()}.jpg",
         content_type="image/jpeg",
     )
+    status_translated = translate_status(_, response["status"])
     await message.answer(
         _(
             "Receipt received. PortmoneDirect payout will start after acceptance. Current status: {status}"
-        ).format(status=response["status"])
+        ).format(status=status_translated)
     )
 
 

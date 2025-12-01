@@ -81,7 +81,7 @@ msgid ""
 "By sharing your contact you agree to the promo terms and privacy policy of "
 "Darnitsa."
 msgstr ""
-"Натискаючи «Поділитися номером», ви погоджуєтеся з умовами акції та політикою "
+"Поділяючи свої контактні дані, ви погоджуєтеся з умовами акції та політикою "
 "конфіденційності Darnitsa."
 
 msgid "Receipt image exceeds 10MB. Please send a smaller file."
@@ -105,4 +105,28 @@ msgstr ""
 
 msgid "- {status} @ {uploaded_at} (Portmone bill: {reference}, payout: {payout_status})"
 msgstr "- {status} @ {uploaded_at} (Portmone: {reference}, статус: {payout_status})"
+
+msgid "Sorry, there was an error connecting to the server. Please try again later."
+msgstr "Вибачте, сталася помилка під час з'єднання з сервером. Будь ласка, спробуйте пізніше."
+
+msgid "pending"
+msgstr "очікує"
+
+msgid "processing"
+msgstr "обробляється"
+
+msgid "accepted"
+msgstr "прийнято"
+
+msgid "rejected"
+msgstr "відхилено"
+
+msgid "payout_pending"
+msgstr "очікує виплати"
+
+msgid "payout_success"
+msgstr "виплачено"
+
+msgid "payout_failed"
+msgstr "помилка виплати"
 
