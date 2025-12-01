@@ -1,7 +1,8 @@
 Collecting sqlalchemy
   Using cached sqlalchemy-2.0.44-cp313-cp313-win_amd64.whl.metadata (9.8 kB)
+Collecting aiosqlite
+  Using cached aiosqlite-0.21.0-py3-none-any.whl.metadata (4.3 kB)
 Collecting greenlet>=1 (from sqlalchemy)
   Using cached greenlet-3.2.4-cp313-cp313-win_amd64.whl.metadata (4.2 kB)
-Requirement already satisfied: typing-extensions>=4.6.0 in c:\users\s.kolchyk\appdata\local\programs\python\python313\lib\site-packages (from sqlalchemy) (4.15.0)
-Downloading sqlalchemy-2.0.44-cp313-cp313-win_amd64.whl (2.1 MB)
-   ----                                     0.3/2.1 MB ? eta -:--:--
+Collecting typing-extensions>=4.6.0 (from sqlalchemy)
+  Using cached typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)

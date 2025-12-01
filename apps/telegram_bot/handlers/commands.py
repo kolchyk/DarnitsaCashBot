@@ -117,6 +117,7 @@ def onboarding_text(_, *, require_phone: bool, user_name: str = "") -> str:
         return _(
             "{greeting}\n\n"
             "Welcome to DarnitsaCashBot! 🎉\n\n"
+            "We will award bonuses for Darnitsa products. A receipt photo is required.\n\n"
             "Share your phone number so we can send 1₴ PortmoneDirect top-ups for each approved receipt. {consent}"
         ).format(greeting=greeting, consent=consent)
     return _(

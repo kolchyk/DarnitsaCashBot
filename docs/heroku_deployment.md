@@ -104,17 +104,25 @@ heroku config:set LOG_LEVEL=INFO
 
 ### 5. Миграции базы данных
 
-После первого деплоя выполните миграции:
+1. **Единоразовое обновление существующей базы.** Перед повторным деплоем выполните миграции вручную, чтобы привести продакшн-базу к актуальному состоянию:
 
-```bash
-heroku run alembic upgrade head
-```
+   ```bash
+   heroku run alembic upgrade head
+   ```
 
-Или через Heroku CLI:
+   Если предпочитаете явный вызов интерпретатора:
 
-```bash
-heroku run python -m alembic upgrade head
-```
+   ```bash
+   heroku run python -m alembic upgrade head
+   ```
+
+2. **Автоматический запуск при каждом деплое.** В `Procfile` добавлена release-команда:
+
+   ```
+   release: alembic upgrade head
+   ```
+
+   Heroku выполняет этот шаг перед запуском новых dyno, поэтому все последующие деплои будут автоматически применять накопленные миграции. Проверяйте логи release-процесса при ошибках (`heroku logs --tail --dyno release`).
 
 ## Деплой
 
@@ -179,10 +187,11 @@ heroku logs --tail | grep -i error
 
 ## Структура процессов
 
-Проект использует два типа процессов в `Procfile`:
+Проект использует три процесса в `Procfile`:
 
 - **web**: API Gateway (FastAPI) - обрабатывает HTTP запросы
 - **worker**: Telegram Bot - обрабатывает сообщения от пользователей
+- **release**: выполняет `alembic upgrade head` перед запуском dyno, чтобы гарантировать актуальную схему базы данных
 
 ## Дополнительные воркеры
 
