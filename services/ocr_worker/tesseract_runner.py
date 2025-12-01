@@ -61,8 +61,11 @@ class TesseractRunner:
             if detected_path:
                 pytesseract.pytesseract.tesseract_cmd = detected_path
                 LOGGER.info("Auto-detected tesseract at %s", detected_path)
-        if settings.tessdata_dir:
-            os.environ["TESSDATA_PREFIX"] = settings.tessdata_dir
+        
+        # Set TESSDATA_PREFIX - use configured value or default Heroku/Ubuntu location
+        tessdata_path = settings.tessdata_dir or "/usr/share/tesseract-ocr/tessdata"
+        os.environ["TESSDATA_PREFIX"] = tessdata_path
+        LOGGER.info("TESSDATA_PREFIX set to %s", tessdata_path)
         self.languages = settings.ocr_languages
         self.profiles = {
             "full": TesseractProfile(name="full", psm=4),

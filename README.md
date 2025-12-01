@@ -152,17 +152,31 @@ heroku buildpacks --app your-app-name
 
 ### Налаштування Tesseract на Heroku
 
-Якщо після деплою виникає помилка `TesseractNotFoundError`, код автоматично намагається знайти tesseract у стандартних місцях встановлення (`/usr/bin/tesseract`, `/usr/local/bin/tesseract`). Для явного вказання шляху до tesseract (рекомендовано для Heroku), встановіть змінну середовища:
+Код автоматично налаштовує Tesseract для Heroku:
+- Автоматично знаходить tesseract у стандартних місцях встановлення (`/usr/bin/tesseract`, `/usr/local/bin/tesseract`)
+- Автоматично встановлює `TESSDATA_PREFIX=/usr/share/tesseract-ocr/tessdata` (стандартне розташування для Ubuntu/Heroku)
+
+Для явного вказання шляхів (опціонально), встановіть змінні середовища:
 
 ```bash
 heroku config:set TESSERACT_CMD=/usr/bin/tesseract
+heroku config:set TESSDATA_DIR=/usr/share/tesseract-ocr/tessdata
 ```
 
-Перевірка встановлення tesseract:
+**Перевірка встановлення tesseract після деплою:**
 
 ```bash
+# Перевірка версії tesseract
 heroku run tesseract --version
+
+# Перевірка доступних мовних пакетів
+heroku run ls /usr/share/tesseract-ocr/tessdata
+
+# Перевірка через Python/pytesseract
 heroku run python -c "import pytesseract; print(pytesseract.get_tesseract_version())"
+
+# Перевірка змінної середовища TESSDATA_PREFIX
+heroku run python -c "import os; print('TESSDATA_PREFIX:', os.environ.get('TESSDATA_PREFIX', 'NOT SET'))"
 ```
 
 ## Доступні сервіси
