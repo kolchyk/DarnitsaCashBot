@@ -89,8 +89,24 @@ REQUEST_LATENCY = _get_or_create_histogram(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
     settings = get_settings()
     # Startup
+    # Check database connection
+    try:
+        from libs.data.database import get_async_session
+        from sqlalchemy import text
+        async for session in get_async_session():
+            # Try a simple query to verify connection
+            await session.execute(text("SELECT 1"))
+            logger.info("Database connection verified successfully")
+            break
+    except Exception as e:
+        logger.error(f"Failed to connect to database: {e}", exc_info=True)
+        logger.warning("Application will start but database operations may fail")
+    
     notification_service = NotificationService(settings)
     app.state.notification_service = notification_service
     app.state.background_tasks = [
@@ -149,7 +165,22 @@ def create_app() -> FastAPI:
 
     @app.get("/healthz", tags=["system"])
     async def health():
-        return {"status": "ok"}
+        """Health check endpoint that verifies database connectivity."""
+        from libs.data.database import get_async_session
+        from sqlalchemy import text
+        
+        db_status = "ok"
+        try:
+            async for session in get_async_session():
+                await session.execute(text("SELECT 1"))
+                break
+        except Exception as e:
+            db_status = f"error: {str(e)}"
+        
+        return {
+            "status": "ok" if db_status == "ok" else "degraded",
+            "database": db_status
+        }
 
     @app.get("/metrics", tags=["system"])
     async def metrics():

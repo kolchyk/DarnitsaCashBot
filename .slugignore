@@ -15,8 +15,6 @@ docs/
 *.md
 docker-compose.yml
 Makefile
-alembic.ini
-alembic/versions/*.py
 services/ocr_worker/Dockerfile
 services/easypay_mock/
 services/portmone_mock/

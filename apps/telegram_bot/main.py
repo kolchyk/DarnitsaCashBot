@@ -27,6 +27,13 @@ async def main() -> None:
     logger.info(f"Starting bot with token: {config.token[:10]}...")
     logger.info(f"API Gateway URL: {settings.api_gateway_url}")
     
+    # Warn if using default localhost URL in production
+    if settings.app_env != "local" and settings.api_gateway_url == "http://localhost:8000":
+        logger.warning(
+            "WARNING: API_GATEWAY_URL is set to default localhost URL. "
+            "This will not work in production. Please set API_GATEWAY_URL to your Heroku app URL."
+        )
+    
     bot = Bot(token=config.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
     receipt_client = ReceiptApiClient(base_url=settings.api_gateway_url)

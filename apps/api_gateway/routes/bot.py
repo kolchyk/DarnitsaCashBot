@@ -86,14 +86,22 @@ async def upsert_user(
         ) from e
     except SQLAlchemyError as e:
         await session.rollback()
+        error_msg = str(e)
+        error_type = type(e).__name__
         logger.error(
             f"Database error while upserting user: telegram_id={payload.telegram_id}, "
-            f"error={str(e)}",
+            f"error_type={error_type}, error={error_msg}",
             exc_info=True,
         )
+        # Include more details in response for debugging (can be removed in production)
+        detail_msg = f"Database error occurred: {error_type}"
+        if "connection" in error_msg.lower() or "connect" in error_msg.lower():
+            detail_msg += " - Database connection issue"
+        elif "relation" in error_msg.lower() or "table" in error_msg.lower() or "does not exist" in error_msg.lower():
+            detail_msg += " - Table or relation does not exist (migrations may be needed)"
         raise HTTPException(
             status_code=500,
-            detail="Database error occurred",
+            detail=detail_msg,
         ) from e
     except Exception as e:
         await session.rollback()
