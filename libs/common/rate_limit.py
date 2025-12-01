@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 from urllib.parse import urlparse
 
 import redis.asyncio as redis
+import redis.exceptions
 
 from libs.common import AppSettings, get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def create_redis_client(
@@ -59,14 +63,58 @@ class RateLimiter:
         )
 
     async def check(self, key: str) -> bool:
+        """
+        Check if the request should be allowed based on rate limiting.
+        
+        Returns True if allowed, False if rate limited.
+        On Redis connection errors, fails open (returns True) to avoid
+        breaking the service when Redis is unavailable.
+        """
         redis_key = f"rl:{self.prefix}:{key}"
-        current = await self._redis.incr(redis_key)
-        if current == 1:
-            await self._redis.expire(redis_key, self.ttl_seconds)
-        return current <= self.limit
+        try:
+            current = await self._redis.incr(redis_key)
+            if current == 1:
+                await self._redis.expire(redis_key, self.ttl_seconds)
+            return current <= self.limit
+        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError, OSError) as e:
+            logger.warning(
+                f"Redis connection error in rate limiter check for key {key}: {e}. "
+                "Failing open (allowing request)."
+            )
+            # Fail open: allow the request when Redis is unavailable
+            return True
+        except Exception as e:
+            logger.error(
+                f"Unexpected error in rate limiter check for key {key}: {e}. "
+                "Failing open (allowing request).",
+                exc_info=True
+            )
+            # Fail open: allow the request on unexpected errors
+            return True
 
     async def tokens_left(self, key: str) -> int:
+        """
+        Get the number of tokens/requests remaining for the given key.
+        
+        Returns the remaining tokens, or the full limit if Redis is unavailable.
+        """
         redis_key = f"rl:{self.prefix}:{key}"
-        current = await self._redis.get(redis_key)
-        return max(self.limit - int(current or 0), 0)
+        try:
+            current = await self._redis.get(redis_key)
+            return max(self.limit - int(current or 0), 0)
+        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError, OSError) as e:
+            logger.warning(
+                f"Redis connection error in rate limiter tokens_left for key {key}: {e}. "
+                "Returning full limit."
+            )
+            # Return full limit when Redis is unavailable
+            return self.limit
+        except Exception as e:
+            logger.error(
+                f"Unexpected error in rate limiter tokens_left for key {key}: {e}. "
+                "Returning full limit.",
+                exc_info=True
+            )
+            # Return full limit on unexpected errors
+            return self.limit
 
