@@ -141,16 +141,50 @@ async def upload_receipt(
 
     checksum = hashlib.sha256(data).hexdigest()
     object_key = f"receipts/{user.id}/{uuid4()}.{file.filename.split('.')[-1]}"
-    await storage.upload_bytes(key=object_key, content=data, content_type=file.content_type or "image/jpeg")
+    
+    try:
+        await storage.upload_bytes(key=object_key, content=data, content_type=file.content_type or "image/jpeg")
+    except RuntimeError as e:
+        await session.rollback()
+        logger.error(
+            f"Storage upload failed for user {telegram_id}: {str(e)}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Storage service temporarily unavailable. Please try again later.",
+        ) from e
+    except Exception as e:
+        await session.rollback()
+        logger.error(
+            f"Unexpected storage error for user {telegram_id}: {type(e).__name__}: {str(e)}",
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to upload receipt. Please try again later.",
+        ) from e
 
     receipt_repo = ReceiptRepository(session)
-    receipt = await receipt_repo.create_receipt(
-        user_id=user.id,
-        upload_ts=datetime.now(timezone.utc),
-        storage_object_key=object_key,
-        checksum=checksum,
-    )
-    await session.commit()
+    try:
+        receipt = await receipt_repo.create_receipt(
+            user_id=user.id,
+            upload_ts=datetime.now(timezone.utc),
+            storage_object_key=object_key,
+            checksum=checksum,
+        )
+        await session.commit()
+    except Exception as e:
+        await session.rollback()
+        logger.error(
+            f"Failed to create receipt record for user {telegram_id}: {type(e).__name__}: {str(e)}",
+            exc_info=True,
+        )
+        # Note: File was uploaded but receipt record failed - this is a partial failure
+        raise HTTPException(
+            status_code=500,
+            detail="Receipt uploaded but failed to process. Please contact support.",
+        ) from e
 
     payload = {
         "receipt_id": str(receipt.id),

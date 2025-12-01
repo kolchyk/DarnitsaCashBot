@@ -56,10 +56,11 @@ class AppSettings(BaseSettings):
             self.postgres_db = parsed.path.lstrip("/") if parsed.path else self.postgres_db
         return self
 
-    storage_endpoint: str = Field(default="http://localhost:9000", alias="STORAGE_ENDPOINT")
+    storage_endpoint: str | None = Field(default=None, alias="STORAGE_ENDPOINT")
     storage_bucket: str = Field(default="receipts", alias="STORAGE_BUCKET")
     storage_access_key: str = Field(default="miniokey", alias="STORAGE_ACCESS_KEY")
     storage_secret_key: str = Field(default="miniopass", alias="STORAGE_SECRET_KEY")
+    storage_region: str = Field(default="us-east-1", alias="STORAGE_REGION")
 
     # Heroku REDIS_URL support
     redis_url_env: str | None = Field(default=None, alias="REDIS_URL", exclude=True)
