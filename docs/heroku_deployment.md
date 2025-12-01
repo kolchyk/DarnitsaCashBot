@@ -16,7 +16,42 @@
 heroku create your-app-name
 ```
 
-### 2. Добавление аддонов
+### 2. Настройка Buildpacks
+
+Проект требует два buildpack'а:
+
+1. **Python buildpack** (автоматически определяется Heroku)
+2. **Apt buildpack** (для установки системных пакетов: Tesseract OCR и библиотеки)
+
+Настройте buildpacks в правильном порядке:
+
+```bash
+# Добавьте Apt buildpack первым (он должен быть установлен до Python buildpack)
+heroku buildpacks:add --index 1 heroku-community/apt
+
+# Python buildpack будет автоматически добавлен вторым
+# Если нужно добавить явно:
+heroku buildpacks:add --index 2 heroku/python
+```
+
+**Проверка установленных buildpacks:**
+```bash
+heroku buildpacks
+```
+
+Должны быть установлены в следующем порядке:
+1. `heroku-community/apt`
+2. `heroku/python`
+
+**Важно:** Файл `Aptfile` уже содержит необходимые системные пакеты:
+- `tesseract-ocr` - движок OCR
+- `tesseract-ocr-ukr` - языковой пакет для украинского языка
+- `tesseract-ocr-rus` - языковой пакет для русского языка
+- `tesseract-ocr-eng` - языковой пакет для английского языка
+- `libglib2.0-0` - библиотеки для OpenCV
+- `libgl1` - библиотеки для OpenCV
+
+### 3. Добавление аддонов
 
 #### База данных PostgreSQL
 ```bash
@@ -38,7 +73,7 @@ heroku addons:create cloudamqp:lemur
 - AWS S3 (рекомендуется)
 - MinIO (для разработки)
 
-### 3. Настройка переменных окружения
+### 4. Настройка переменных окружения
 
 Установите необходимые переменные окружения:
 
@@ -72,7 +107,7 @@ heroku config:set LOG_LEVEL=INFO
 
 **Примечание:** `DATABASE_URL`, `REDIS_URL` и `CLOUDAMQP_URL` автоматически устанавливаются Heroku при добавлении соответствующих аддонов.
 
-### 4. Миграции базы данных
+### 5. Миграции базы данных
 
 После первого деплоя выполните миграции:
 
