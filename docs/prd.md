@@ -63,7 +63,7 @@ For the MVP we only need the lean metrics that prove receipts progress through t
 
 The following components represent the thinnest set required to exercise the MVP flow end-to-end; additional services (e.g., rich admin tooling, loyalty engines) remain out-of-scope until the flow is proven.
 - **Telegram Layer**: Bot webhook hosted behind HTTPS reverse proxy (Cloudflare/NGINX) interfacing with Telegram servers.
-- **Receipt Service**: Handles media uploads, stores images in object storage, emits events to processing queue (e.g., RabbitMQ/Kafka).
+- **Receipt Service**: Handles media uploads, stores images in object storage, processes receipts directly.
 - **OCR Pipeline**: Stateless workers that call external OCR vendor, normalize text, and persist structured JSON.
 - **Catalog & Rules Engine**: Service maintaining Darnitsa SKU metadata and eligibility logic; exposes gRPC/REST to other services.
 - **Bonus Service**: Manages idempotent payout requests, interacts with the PortmoneDirect API, and updates BonusTransaction records.

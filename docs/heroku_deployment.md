@@ -63,11 +63,6 @@ heroku addons:create heroku-postgresql:mini
 heroku addons:create heroku-redis:mini
 ```
 
-#### RabbitMQ (CloudAMQP)
-```bash
-heroku addons:create cloudamqp:lemur
-```
-
 #### Хранилище (S3-совместимое)
 Для хранения файлов чеков можно использовать:
 - AWS S3 (рекомендуется)
@@ -105,7 +100,7 @@ heroku config:set APP_ENV=prod
 heroku config:set LOG_LEVEL=INFO
 ```
 
-**Примечание:** `DATABASE_URL`, `REDIS_URL` и `CLOUDAMQP_URL` автоматически устанавливаются Heroku при добавлении соответствующих аддонов.
+**Примечание:** `DATABASE_URL` и `REDIS_URL` автоматически устанавливаются Heroku при добавлении соответствующих аддонов.
 
 ### 5. Миграции базы данных
 
@@ -240,13 +235,6 @@ heroku config:get DATABASE_URL
 Проверьте REDIS_URL:
 ```bash
 heroku config:get REDIS_URL
-```
-
-### Проблемы с RabbitMQ
-
-Проверьте CLOUDAMQP_URL:
-```bash
-heroku config:get CLOUDAMQP_URL
 ```
 
 ### Просмотр детальных логов

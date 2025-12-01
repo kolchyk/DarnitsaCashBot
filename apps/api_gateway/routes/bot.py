@@ -8,14 +8,12 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from libs.common.analytics import AnalyticsClient
-from libs.common.messaging import MessageBroker, QueueNames
 from libs.common.rate_limit import RateLimiter
 from libs.common.storage import StorageClient
 from libs.data.repositories import ReceiptRepository, UserRepository
 
 from ..dependencies import (
     get_analytics,
-    get_broker,
     get_receipt_rate_limiter,
     get_session_dep,
     get_storage_client,
@@ -60,7 +58,6 @@ async def upload_receipt(
     file: UploadFile = File(...),
     session: AsyncSession = Depends(get_session_dep),
     storage: StorageClient = Depends(get_storage_client),
-    broker: MessageBroker = Depends(get_broker),
     analytics: AnalyticsClient = Depends(get_analytics),
     limiter: RateLimiter = Depends(get_receipt_rate_limiter),
 ):
@@ -98,11 +95,10 @@ async def upload_receipt(
         "checksum": checksum,
         "telegram_id": telegram_id,
     }
-    await broker.publish(QueueNames.RECEIPTS, payload)
     await analytics.record("receipt_uploaded", payload)
     return ReceiptUploadResponse(
         receipt=ReceiptResponse(receipt_id=receipt.id, status=receipt.status),
-        queue_reference=QueueNames.RECEIPTS,
+        queue_reference="receipts.incoming",
     )
 
 

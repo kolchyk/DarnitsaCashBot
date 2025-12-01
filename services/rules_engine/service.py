@@ -6,7 +6,6 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from libs.common import configure_logging, get_settings
-from libs.common.messaging import MessageBroker, QueueNames
 from libs.data import async_session_factory
 from libs.data.models import LineItem, Receipt
 from libs.data.repositories import ReceiptRepository
@@ -15,7 +14,7 @@ ELIGIBILITY_WINDOW_DAYS = 7
 MAX_RECEIPTS_PER_DAY = 3
 
 
-async def evaluate(payload: dict, broker: MessageBroker) -> None:
+async def evaluate(payload: dict) -> None:
     receipt_id = UUID(payload["receipt_id"])
     async with async_session_factory() as session:
         receipt: Receipt | None = await session.get(Receipt, receipt_id)
@@ -27,10 +26,7 @@ async def evaluate(payload: dict, broker: MessageBroker) -> None:
         if ocr_payload.get("error") or payload.get("status") == "failed":
             receipt.status = "rejected"
             await session.commit()
-            await broker.publish(
-                QueueNames.RULE_DECISIONS,
-                {"receipt_id": str(receipt.id), "status": "rejected", "reason": "ocr_failed"},
-            )
+            # RabbitMQ removed - decisions are now stored in database only
             return
 
         repo = ReceiptRepository(session)
@@ -38,7 +34,7 @@ async def evaluate(payload: dict, broker: MessageBroker) -> None:
         if daily_count > MAX_RECEIPTS_PER_DAY:
             receipt.status = "rejected"
             await session.commit()
-            await broker.publish(QueueNames.RULE_DECISIONS, {"receipt_id": str(receipt.id), "status": "rejected", "reason": "daily_limit"})
+            # RabbitMQ removed - decisions are now stored in database only
             return
 
         purchase_ts = ocr_payload.get("purchase_ts")
@@ -47,7 +43,7 @@ async def evaluate(payload: dict, broker: MessageBroker) -> None:
             if receipt.purchase_ts < datetime.now(timezone.utc) - timedelta(days=ELIGIBILITY_WINDOW_DAYS):
                 receipt.status = "rejected"
                 await session.commit()
-                await broker.publish(QueueNames.RULE_DECISIONS, {"receipt_id": str(receipt.id), "status": "rejected", "reason": "expired"})
+                # RabbitMQ removed - decisions are now stored in database only
                 return
 
         # Принимаем все чеки, которые успешно прошли OCR
@@ -84,24 +80,16 @@ async def evaluate(payload: dict, broker: MessageBroker) -> None:
         # Принимаем чек, если OCR успешно распознал товары
         receipt.status = "accepted" if has_items else "rejected"
         await session.commit()
-    await broker.publish(
-        QueueNames.RULE_DECISIONS,
-        {"receipt_id": str(receipt_id), "status": receipt.status, "eligible": receipt.status == "accepted"},
-    )
+    # RabbitMQ removed - decisions are now stored in database only
 
 
 async def run_worker() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
-    broker = MessageBroker(settings)
+    # RabbitMQ removed - worker no longer consumes from queue
+    # This worker should be called directly or via HTTP endpoint instead
     while True:
-        async with broker.consume(QueueNames.OCR_RESULTS) as queue:
-            async with queue.iterator() as iterator:
-                async for message in iterator:
-                    async with message.process():
-                        payload = json.loads(message.body.decode("utf-8"))
-                        await evaluate(payload, broker)
-        await asyncio.sleep(1)
+        await asyncio.sleep(60)  # Placeholder - no longer consuming from queue
 
 
 def run():

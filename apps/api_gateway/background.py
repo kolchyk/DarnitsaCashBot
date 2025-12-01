@@ -4,28 +4,14 @@ import asyncio
 import json
 
 from libs.common import get_settings
-from libs.common.messaging import MessageBroker, QueueNames
 from libs.common.notifications import NotificationService
 from libs.data.models import ReceiptStatus
 
 
 async def bonus_event_listener(notification_service: NotificationService):
-    settings = get_settings()
-    broker = MessageBroker(settings)
+    # RabbitMQ removed - bonus events are now handled synchronously
     while True:
-        async with broker.consume(QueueNames.BONUS_EVENTS) as queue:
-            async with queue.iterator() as iterator:
-                async for message in iterator:
-                    async with message.process():
-                        payload = json.loads(message.body.decode("utf-8"))
-                        telegram_id = payload.get("telegram_id")
-                        if telegram_id:
-                            text = _format_payout_message(payload)
-                            await notification_service.send_message(
-                                chat_id=int(telegram_id),
-                                text=text,
-                            )
-        await asyncio.sleep(1)
+        await asyncio.sleep(60)  # Placeholder - no longer consuming from queue
 
 
 async def reminder_job(notification_service: NotificationService):

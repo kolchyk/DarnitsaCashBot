@@ -18,13 +18,19 @@ def _init_engine():
         # Add SSL parameters for Heroku Postgres
         connect_args = {}
         if settings._heroku_database_url:
-            # Heroku Postgres requires SSL - asyncpg uses ssl=True
-            connect_args = {"ssl": True}
+            # Heroku Postgres requires SSL - asyncpg uses ssl='require' for production
+            # This ensures SSL is used without strict certificate validation
+            import ssl
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            connect_args = {"ssl": ssl_context}
         
         _engine = create_async_engine(
             settings.database_url,
             echo=settings.app_env == "local",
             connect_args=connect_args,
+            pool_pre_ping=True,  # Verify connections before using them
         )
         _async_session_factory = async_sessionmaker(_engine, expire_on_commit=False)
     return _engine, _async_session_factory

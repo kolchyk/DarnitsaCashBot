@@ -10,7 +10,6 @@ from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt,
 from libs.common import AppSettings, configure_logging, get_settings
 from libs.common.analytics import AnalyticsClient
 from libs.common.crypto import Encryptor
-from libs.common.messaging import MessageBroker, QueueNames
 from libs.common.portmone import (
     PortmoneDirectClient,
     PortmoneResponse,
@@ -35,7 +34,6 @@ class BonusContext:
 
 async def trigger_payout(
     payload: dict,
-    broker: MessageBroker,
     analytics: AnalyticsClient,
     client: PortmoneDirectClient,
     encryptor: Encryptor,
@@ -69,7 +67,6 @@ async def trigger_payout(
     except PortmoneResponseError as exc:
         await _record_failure(
             context=context,
-            broker=broker,
             analytics=analytics,
             error_code=exc.response.errors[0].code if exc.response.errors else None,
             error_description=exc.response.errors[0].description if exc.response.errors else None,
@@ -80,7 +77,6 @@ async def trigger_payout(
     except PortmoneTransportError as exc:
         await _record_failure(
             context=context,
-            broker=broker,
             analytics=analytics,
             error_code="transport",
             error_description=str(exc),
@@ -92,7 +88,6 @@ async def trigger_payout(
     if response is None:
         await _record_failure(
             context=context,
-            broker=broker,
             analytics=analytics,
             error_code="unknown",
             error_description="Empty Portmone response",
@@ -101,7 +96,7 @@ async def trigger_payout(
         )
         return
 
-    await _record_pending(context, response, broker, analytics)
+    await _record_pending(context, response, analytics)
 
 
 async def _prepare_bonus_context(
@@ -155,7 +150,6 @@ async def _prepare_bonus_context(
 async def _record_pending(
     context: BonusContext,
     response: PortmoneResponse,
-    broker: MessageBroker,
     analytics: AnalyticsClient,
 ) -> None:
     async with async_session_factory() as session:
@@ -177,22 +171,11 @@ async def _record_pending(
             "bill_id": response.bill_id,
         },
     )
-    await broker.publish(
-        QueueNames.BONUS_EVENTS,
-        {
-            "receipt_id": str(context.receipt_id),
-            "transaction_id": str(context.bonus_id),
-            "status": ReceiptStatus.PAYOUT_PENDING,
-            "payout_status": BonusStatus.IN_PROGRESS,
-            "bill_id": response.bill_id,
-            "telegram_id": context.telegram_id,
-        },
-    )
+    # RabbitMQ removed - bonus events are now stored in database only
 
 
 async def _record_failure(
     context: BonusContext,
-    broker: MessageBroker,
     analytics: AnalyticsClient,
     error_code: str | None,
     error_description: str | None,
@@ -221,37 +204,21 @@ async def _record_failure(
             "error_code": error_code,
         },
     )
-    await broker.publish(
-        QueueNames.BONUS_EVENTS,
-        {
-            "receipt_id": str(context.receipt_id),
-            "transaction_id": str(context.bonus_id),
-            "status": ReceiptStatus.PAYOUT_FAILED,
-            "payout_status": BonusStatus.FAILED,
-            "error_code": error_code,
-            "error_description": error_description,
-            "telegram_id": context.telegram_id,
-        },
-    )
+    # RabbitMQ removed - bonus events are now stored in database only
 
 
 async def worker_loop() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
-    broker = MessageBroker(settings)
     analytics = AnalyticsClient(settings)
     encryptor = Encryptor()
     client = PortmoneDirectClient(settings)
 
     try:
+        # RabbitMQ removed - worker no longer consumes from queue
+        # This worker should be called directly or via HTTP endpoint instead
         while True:
-            async with broker.consume(QueueNames.RULE_DECISIONS) as queue:
-                async with queue.iterator() as iterator:
-                    async for message in iterator:
-                        async with message.process():
-                            payload = json.loads(message.body.decode("utf-8"))
-                            await trigger_payout(payload, broker, analytics, client, encryptor, settings)
-            await asyncio.sleep(1)
+            await asyncio.sleep(60)  # Placeholder - no longer consuming from queue
     finally:
         await client.aclose()
 

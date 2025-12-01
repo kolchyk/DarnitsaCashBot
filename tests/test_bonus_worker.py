@@ -29,7 +29,7 @@ async def test_trigger_payout_happy_path(monkeypatch):
     async def fake_prepare(*_args, **_kwargs):
         return context
 
-    async def fake_pending(ctx, response, broker, analytics):
+    async def fake_pending(ctx, response, analytics):
         fake_pending.called = True
         assert ctx == context
         assert response.bill_id == "42"

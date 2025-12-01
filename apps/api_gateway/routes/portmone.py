@@ -6,14 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from libs.common import AppSettings
 from libs.common.analytics import AnalyticsClient
-from libs.common.messaging import MessageBroker, QueueNames
 from libs.common.portmone import PortmoneResponse, parse_portmone_response
 from libs.common.xml_utils import XMLParseError
 from libs.data.models import BonusStatus, BonusTransaction, Receipt, ReceiptStatus
 
 from ..dependencies import (
     get_analytics,
-    get_broker,
     get_session_dep,
     get_settings_dep,
 )
@@ -25,7 +23,6 @@ router = APIRouter()
 async def portmone_webhook(
     request: Request,
     session: AsyncSession = Depends(get_session_dep),
-    broker: MessageBroker = Depends(get_broker),
     analytics: AnalyticsClient = Depends(get_analytics),
     settings: AppSettings = Depends(get_settings_dep),
 ) -> dict[str, str]:
@@ -65,19 +62,6 @@ async def portmone_webhook(
             "receipt_id": str(receipt.id),
             "bonus_id": str(bonus.id),
             "bill_id": bill_id,
-        },
-    )
-    await broker.publish(
-        QueueNames.BONUS_EVENTS,
-        {
-            "receipt_id": str(receipt.id),
-            "transaction_id": str(bonus.id),
-            "status": event_status,
-            "payout_status": bonus.payout_status,
-            "bill_id": bonus.portmone_bill_id,
-            "telegram_id": telegram_id,
-            "error_code": bonus.portmone_error_code,
-            "error_description": bonus.portmone_error_description,
         },
     )
     return {"status": "ok"}

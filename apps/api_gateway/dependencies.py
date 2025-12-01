@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from libs.common import AppSettings, get_settings
 from libs.common.analytics import AnalyticsClient
-from libs.common.messaging import MessageBroker
 from libs.common.storage import StorageClient
 from libs.common.rate_limit import RateLimiter
 from libs.data.database import get_async_session
@@ -27,8 +26,6 @@ def get_storage_client(settings: AppSettings = Depends(get_settings_dep)) -> Sto
     return StorageClient(settings)
 
 
-def get_broker(settings: AppSettings = Depends(get_settings_dep)) -> MessageBroker:
-    return MessageBroker(settings)
 
 
 def get_analytics(settings: AppSettings = Depends(get_settings_dep)) -> AnalyticsClient:

@@ -37,7 +37,7 @@ This guide explains how to extend `DarnitsaCashBot` so it can create and manage 
   - `PORTMONE_API_BASE` (default `https://direct.portmone.com.ua/api/directcash/`).
   - `PORTMONE_VERSION` (set to `2` to access extended errors/localization).
   - `PORTMONE_LANG` (optional).
-- Existing receipt processing pipeline that publishes `receipt.accepted` events to `QueueNames.RULE_DECISIONS`.
+- Existing receipt processing pipeline that processes receipts and updates their status to `accepted`.
 - Optional downstream telecom API contract if PortmoneDirect is only delivering payment orders and not the final airtime execution.
 
 ## 3. Client Setup
@@ -70,12 +70,12 @@ This guide explains how to extend `DarnitsaCashBot` so it can create and manage 
            response.raise_for_status()
            return response.text
    ```
-4. Register a webhook in `apps/api_gateway/routes/portmone.py` that receives PortmoneDirect status notifications and pushes them into `QueueNames.BONUS_EVENTS`.
+4. Register a webhook in `apps/api_gateway/routes/portmone.py` that receives PortmoneDirect status notifications and updates bonus transaction statuses.
 5. Normalize XML parsing inside a shared helper (`libs/common/xml_utils.py`) so workers can map `<rsp status>` and `<error>` payloads into domain enums.
 6. For local tests run `docker compose up portmone-mock` and set `PORTMONE_API_BASE=http://localhost:8082/api/directcash/`.
 
 ## 4. Receipt-Gated Flow
-1. Bonus worker consumes `receipt.accepted` events, ensures `Receipt.status == "accepted"`, decrypts the MSISDN, and gathers the `payeeId`/`contractNumber`.
+1. Bonus worker processes receipts with `Receipt.status == "accepted"`, decrypts the MSISDN, and gathers the `payeeId`/`contractNumber`.
 2. Prepare the Portmone payload:
    ```python
    payload = {

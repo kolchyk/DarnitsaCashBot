@@ -6,7 +6,7 @@
 
 - **Основная цель**: автоматизировать процесс "чек на вход → выплата на выход" для украинских покупателей, награждая каждый принятый чек Darnitsa пополнением мобильного счета на 1 UAH.
 - **Основополагающие документы**: держите открытыми `prd.md`, `OCR.md` и `easy.md` при работе с ботом для проверки предположений (окно приемлемости, задержка выплат, защита от мошенничества).
-- **Инфраструктура**: PostgreSQL, RabbitMQ, Redis, хранилище, совместимое с S3, OCR-воркеры, движок правил и подключение к PortmoneDirect должны быть доступны перед включением бота.
+- **Инфраструктура**: PostgreSQL, Redis, хранилище, совместимое с S3, OCR-воркеры, движок правил и подключение к PortmoneDirect должны быть доступны перед включением бота.
 
 ## 2. Схема разговора в Telegram
 
@@ -33,7 +33,7 @@
 1. `media.handle_receipt_photo` прослушивает `Message.photo`.
 2. Бот проверяет размер изображения как на стороне клиента (`photo.file_size <= 10 MB`), так и на стороне сервера (`apps/api_gateway/routes/bot.py::upload_receipt` повторно проверяет `MAX_FILE_SIZE` и MIME-тип).
 3. Бот отвечает "Обрабатываю ваш чек…" и передает байты в `/bot/receipts` (multipart upload, см. `ReceiptApiClient.upload_receipt`).
-4. API-шлюз сохраняет файл в объектном хранилище, ставит в очередь `QueueNames.RECEIPTS` и возвращает начальный статус БД, который бот повторяет обратно.
+4. API-шлюз сохраняет файл в объектном хранилище и возвращает начальный статус БД, который бот повторяет обратно.
 5. Нефото-данные попадают в `fallback_handler`, поддерживая чистоту чата и направляя пользователей обратно к `/help`.
 
 ### 2.4 Локализация и поддержка текстов
@@ -52,11 +52,11 @@
 
 | Шаг | Компонент и файл | Описание |
 | --- | --- | --- |
-| 1. Прием | `apps/api_gateway/routes/bot.py::upload_receipt` | Сохраняет пользователя + чек, сохраняет медиа в S3/MinIO через `StorageClient`, логирует аналитику и публикует в `QueueNames.RECEIPTS`. |
-| 2. OCR | `services/ocr_worker/worker.py` | Потребляет сообщения о чеках, вызывает OCR-сервис (`http://ocr-mock:8081/ocr` по умолчанию), сохраняет JSON-вывод в `Receipt` и отправляет в `QueueNames.OCR_RESULTS`. |
-| 3. Приемлемость | `services/rules_engine/service.py` | Загружает алиасы каталога (`CatalogRepository`), запускает `is_receipt_eligible`, записывает `LineItem`s, обновляет статус на `accepted` или `rejected`, затем публикует в `QueueNames.RULE_DECISIONS`. |
-| 4. Оркестрация бонусов | `services/bonus_service/main.py` | При `status=accepted` расшифровывает MSISDN, создает/обновляет `BonusTransaction`, отправляет в PortmoneDirect (см. `easy.md`), обновляет статусы, отправляет аналитику и проталкивает события статуса в `QueueNames.BONUS_EVENTS`. |
-| 5. Уведомления | `apps/api_gateway/background.py::bonus_event_listener` | Прослушивает `bonus.events`, затем делегирует `libs.common.notifications.NotificationService` для отправки финальных сообщений обратно в Telegram. |
+| 1. Прием | `apps/api_gateway/routes/bot.py::upload_receipt` | Сохраняет пользователя + чек, сохраняет медиа в S3/MinIO через `StorageClient`, логирует аналитику. |
+| 2. OCR | `services/ocr_worker/worker.py` | Обрабатывает чеки, вызывает OCR-сервис (`http://ocr-mock:8081/ocr` по умолчанию), сохраняет JSON-вывод в `Receipt`. |
+| 3. Приемлемость | `services/rules_engine/service.py` | Загружает алиасы каталога (`CatalogRepository`), запускает `is_receipt_eligible`, записывает `LineItem`s, обновляет статус на `accepted` или `rejected`. |
+| 4. Оркестрация бонусов | `services/bonus_service/main.py` | При `status=accepted` расшифровывает MSISDN, создает/обновляет `BonusTransaction`, отправляет в PortmoneDirect (см. `easy.md`), обновляет статусы, отправляет аналитику. |
+| 5. Уведомления | `apps/api_gateway/background.py::bonus_event_listener` | Обрабатывает события бонусов и делегирует `libs.common.notifications.NotificationService` для отправки финальных сообщений обратно в Telegram. |
 
 Каждый переход сохраняет корреляционную нагрузку (`receipt_id`, `user_id`, `telegram_id`, `checksum`), чтобы логи можно было отслеживать от начала до конца.
 
@@ -85,7 +85,7 @@
    - Заполните секреты `POSTGRES_*` и запустите миграции (см. `libs/data/models/*`).
    - Предоставьте учетные данные, совместимые с S3: `STORAGE_ENDPOINT`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY`, `STORAGE_SECRET_KEY`.
 3. **Обмен сообщениями и кэширование**
-   - Убедитесь, что RabbitMQ (`RABBITMQ_*`) и Redis (`REDIS_HOST`, `REDIS_PORT`) доступны перед запуском воркеров.
+   - Убедитесь, что Redis (`REDIS_HOST`, `REDIS_PORT`) доступен перед запуском воркеров.
 4. **Безопасность**
    - Сгенерируйте `ENCRYPTION_SECRET` (32 байта) для шифрования телефона.
    - Установите секреты JWT, если используются admin API.
@@ -93,7 +93,7 @@
    - `PORTMONE_API_BASE`, `PORTMONE_LOGIN`, `PORTMONE_PASSWORD`, `PORTMONE_PAYEE_ID`, `PORTMONE_CERT_PATH`, `PORTMONE_WEBHOOK_TOKEN`.
    - URL эндпоинта OCR + учетные данные (обновите `ocr_worker` для использования продакшен-хоста).
 6. **Порядок запуска**
-   - Запустите зависимости (БД, хранилище, RabbitMQ, Redis) → запустите `apps/api_gateway` (FastAPI) → запустите фоновый слушатель и планировщики → запустите `services/ocr_worker`, `services/rules_engine`, `services/bonus_service` → наконец запустите `apps/telegram_bot`.
+   - Запустите зависимости (БД, хранилище, Redis) → запустите `apps/api_gateway` (FastAPI) → запустите фоновый слушатель и планировщики → запустите `services/ocr_worker`, `services/rules_engine`, `services/bonus_service` → наконец запустите `apps/telegram_bot`.
 7. **Базовый URL API чеков**
    - Переопределите `ReceiptApiClient(base_url=...)` в `apps/telegram_bot/main.py`, если API-шлюз не находится на `http://localhost:8000`.
 

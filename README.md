@@ -9,7 +9,7 @@ apps/              # User-facing entrypoints (telegram bot, HTTP APIs)
 libs/              # Shared libraries (config, data access, helpers)
 services/          # Background workers (OCR, rules, payouts, mocks)
 tests/             # Unit/integration tests
-docker-compose.yml # Local infra: Postgres, Redis, RabbitMQ, MinIO, mocks
+docker-compose.yml # Local infra: Postgres, Redis, MinIO, mocks
 ```
 
 ## Getting Started
@@ -57,7 +57,6 @@ poetry run python -m apps.telegram_bot.main
 heroku create your-app-name
 heroku addons:create heroku-postgresql:mini
 heroku addons:create heroku-redis:mini
-heroku addons:create cloudamqp:lemur
 heroku config:set TELEGRAM_BOT_TOKEN=your_token ENCRYPTION_SECRET=your_secret
 git push heroku main
 heroku run alembic upgrade head

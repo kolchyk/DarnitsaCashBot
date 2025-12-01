@@ -7,7 +7,6 @@ from datetime import datetime
 from uuid import UUID
 
 from libs.common import configure_logging, get_settings
-from libs.common.messaging import MessageBroker, QueueNames
 from libs.common.storage import StorageClient
 from libs.data import async_session_factory
 from libs.data.models import Receipt, ReceiptStatus
@@ -20,7 +19,7 @@ from .tesseract_runner import TesseractResult, TesseractRunner, TesseractRuntime
 LOGGER = logging.getLogger(__name__)
 
 
-async def process_message(broker: MessageBroker, payload: dict) -> None:
+async def process_message(payload: dict) -> None:
     settings = get_settings()
     receipt_id = UUID(payload["receipt_id"])
     async with async_session_factory() as session:
@@ -47,7 +46,7 @@ async def process_message(broker: MessageBroker, payload: dict) -> None:
             failure_payload = {"error": str(exc), "type": "unreadable_image"}
             receipt.ocr_payload = failure_payload
             await session.commit()
-            await _publish_failure(broker, payload, failure_payload)
+            await _publish_failure(payload, failure_payload)
             return
         except TesseractRuntimeError as exc:
             LOGGER.error("Tesseract failure for receipt %s: %s", receipt_id, exc)
@@ -55,7 +54,7 @@ async def process_message(broker: MessageBroker, payload: dict) -> None:
             failure_payload = {"error": str(exc), "type": "tesseract_failure"}
             receipt.ocr_payload = failure_payload
             await session.commit()
-            await _publish_failure(broker, payload, failure_payload)
+            await _publish_failure(payload, failure_payload)
             return
 
         catalog_repo = CatalogRepository(session)
@@ -92,10 +91,7 @@ async def process_message(broker: MessageBroker, payload: dict) -> None:
         receipt.status = ReceiptStatus.PROCESSING
         await session.commit()
 
-    await broker.publish(
-        QueueNames.OCR_RESULTS,
-        {**payload, "ocr_payload": structured_payload},
-    )
+    # RabbitMQ removed - OCR results are now stored in database only
 
 
 def _run_tesseract(preprocess_result: PreprocessResult, settings):
@@ -123,25 +119,17 @@ async def _persist_artifacts(
     return manifest
 
 
-async def _publish_failure(broker: MessageBroker, payload: dict, failure_payload: dict) -> None:
-    await broker.publish(
-        QueueNames.OCR_RESULTS,
-        {**payload, "ocr_payload": failure_payload, "status": "failed"},
-    )
+async def _publish_failure(payload: dict, failure_payload: dict) -> None:
+    # RabbitMQ removed - failures are now stored in database only
 
 
 async def run_worker() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
-    broker = MessageBroker(settings)
+    # RabbitMQ removed - worker no longer consumes from queue
+    # This worker should be called directly or via HTTP endpoint instead
     while True:
-        async with broker.consume(QueueNames.RECEIPTS) as queue:
-            async with queue.iterator() as queue_iter:
-                async for message in queue_iter:
-                    async with message.process():
-                        payload = json.loads(message.body.decode("utf-8"))
-                        await process_message(broker, payload)
-        await asyncio.sleep(1)
+        await asyncio.sleep(60)  # Placeholder - no longer consuming from queue
 
 
 def run():

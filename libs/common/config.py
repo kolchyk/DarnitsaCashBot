@@ -20,8 +20,6 @@ class AppSettings(BaseSettings):
         if isinstance(values, dict):
             if "DATABASE_URL" not in values:
                 values["DATABASE_URL"] = os.getenv("DATABASE_URL")
-            if "CLOUDAMQP_URL" not in values:
-                values["CLOUDAMQP_URL"] = os.getenv("CLOUDAMQP_URL")
             if "REDIS_URL" not in values:
                 values["REDIS_URL"] = os.getenv("REDIS_URL")
         return values
@@ -62,28 +60,6 @@ class AppSettings(BaseSettings):
     storage_bucket: str = Field(default="receipts", alias="STORAGE_BUCKET")
     storage_access_key: str = Field(default="miniokey", alias="STORAGE_ACCESS_KEY")
     storage_secret_key: str = Field(default="miniopass", alias="STORAGE_SECRET_KEY")
-
-    # Heroku CLOUDAMQP_URL support (internal, not exposed as field)
-    _heroku_cloudamqp_url: str | None = PrivateAttr(default=None)
-    
-    rabbitmq_host: str = Field(default="localhost", alias="RABBITMQ_HOST")
-    rabbitmq_port: int = Field(default=5672, alias="RABBITMQ_PORT")
-    rabbitmq_user: str = Field(default="guest", alias="RABBITMQ_DEFAULT_USER")
-    rabbitmq_password: str = Field(default="guest", alias="RABBITMQ_DEFAULT_PASS")
-    
-    @model_validator(mode="after")
-    def parse_heroku_rabbitmq_url(self):
-        """Parse Heroku CLOUDAMQP_URL if provided."""
-        import os
-        amqp_url = os.getenv("CLOUDAMQP_URL") or self._heroku_cloudamqp_url
-        if amqp_url:
-            self._heroku_cloudamqp_url = amqp_url
-            parsed = urlparse(amqp_url)
-            self.rabbitmq_host = parsed.hostname or self.rabbitmq_host
-            self.rabbitmq_port = parsed.port or self.rabbitmq_port
-            self.rabbitmq_user = parsed.username or self.rabbitmq_user
-            self.rabbitmq_password = parsed.password or self.rabbitmq_password
-        return self
 
     # Heroku REDIS_URL support (internal, not exposed as field)
     _heroku_redis_url: str | None = PrivateAttr(default=None)
