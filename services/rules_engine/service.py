@@ -27,6 +27,11 @@ from libs.data.repositories import ReceiptRepository
 LOGGER = logging.getLogger(__name__)
 
 
+def _normalize_for_matching(text: str) -> str:
+    """Normalize text for keyword matching: NFC normalization + lowercase."""
+    return unicodedata.normalize("NFC", text).lower()
+
+
 async def evaluate(payload: dict) -> None:
     receipt_id = UUID(payload["receipt_id"])
     async with async_session_factory() as session:
@@ -70,45 +75,77 @@ async def evaluate(payload: dict) -> None:
         
         # First, check merchant name for Darnitsa keywords
         if receipt.merchant:
-            merchant_lower = receipt.merchant.lower()
-            merchant_normalized = unidecode(unicodedata.normalize("NFC", receipt.merchant)).lower()
+            # Normalize merchant name for matching (NFC + lowercase)
+            merchant_normalized = _normalize_for_matching(receipt.merchant)
+            # Also create transliterated version for Latin keyword matching
+            merchant_transliterated = unidecode(merchant_normalized)
+            
+            # Normalize keywords for consistent comparison
+            cyrillic_keywords_normalized = [_normalize_for_matching(kw) for kw in DARNITSA_KEYWORDS_CYRILLIC]
+            latin_keywords_normalized = [kw.lower() for kw in DARNITSA_KEYWORDS_LATIN]
             
             # Check for Darnitsa in merchant name (Cyrillic)
-            if any(keyword in merchant_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC):
-                has_darnitsa = True
-                LOGGER.debug("Found Darnitsa keyword (cyrillic) in merchant: '%s'", receipt.merchant[:50])
-            # Check in normalized merchant name (transliteration)
-            elif any(keyword in merchant_normalized for keyword in DARNITSA_KEYWORDS_LATIN):
-                has_darnitsa = True
-                LOGGER.debug("Found Darnitsa keyword (latin) in merchant: '%s'", receipt.merchant[:50])
+            matched_keyword = None
+            for i, keyword_normalized in enumerate(cyrillic_keywords_normalized):
+                if keyword_normalized in merchant_normalized:
+                    matched_keyword = DARNITSA_KEYWORDS_CYRILLIC[i]
+                    has_darnitsa = True
+                    LOGGER.info("Found Darnitsa keyword (cyrillic) '%s' in merchant: '%s'", matched_keyword, receipt.merchant[:50])
+                    break
+            # Check in transliterated merchant name (Latin)
+            if not has_darnitsa:
+                for i, keyword_normalized in enumerate(latin_keywords_normalized):
+                    if keyword_normalized in merchant_transliterated:
+                        matched_keyword = DARNITSA_KEYWORDS_LATIN[i]
+                        has_darnitsa = True
+                        LOGGER.info("Found Darnitsa keyword (latin) '%s' in merchant: '%s'", matched_keyword, receipt.merchant[:50])
+                        break
+            if not has_darnitsa:
+                LOGGER.info("No Darnitsa keyword found in merchant '%s' (normalized: '%s', transliterated: '%s', checked %d cyrillic + %d latin keywords)", 
+                           receipt.merchant[:50], merchant_normalized[:50], merchant_transliterated[:50], 
+                           len(DARNITSA_KEYWORDS_CYRILLIC), len(DARNITSA_KEYWORDS_LATIN))
+                LOGGER.debug("Cyrillic keywords checked: %s", DARNITSA_KEYWORDS_CYRILLIC)
+                LOGGER.debug("Latin keywords checked: %s", DARNITSA_KEYWORDS_LATIN)
         
         # Save all recognized products and check for Darnitsa
         LOGGER.info(
-            "Evaluating receipt %s: line_items=%d, daily_count=%d/%d, merchant=%s",
+            "Evaluating receipt %s: line_items=%d, daily_count=%d/%d, merchant=%s, has_darnitsa_so_far=%s",
             receipt_id,
             len(line_items),
             daily_count,
             MAX_RECEIPTS_PER_DAY,
             receipt.merchant[:50] if receipt.merchant else "None",
+            has_darnitsa,
         )
+        
+        # Normalize keywords once for consistent comparison
+        cyrillic_keywords_normalized = [_normalize_for_matching(kw) for kw in DARNITSA_KEYWORDS_CYRILLIC]
+        latin_keywords_normalized = [kw.lower() for kw in DARNITSA_KEYWORDS_LATIN]
         
         for item in line_items:
             # Get original text (now 'name' contains original text, not normalized)
             original_name = item.get("name", "")
-            # Normalize for Latin keyword matching if needed
-            normalized_name = unidecode(unicodedata.normalize("NFC", original_name))
+            # Normalize for matching (NFC + lowercase)
+            item_normalized = _normalize_for_matching(original_name)
+            # Also create transliterated version for Latin keyword matching
+            item_transliterated = unidecode(item_normalized)
             
-            original_lower = original_name.lower()
-            normalized_lower = normalized_name.lower()
-            
-            # Check for Darnitsa in original text (Cyrillic)
-            if any(keyword in original_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC):
-                has_darnitsa = True
-                LOGGER.debug("Found Darnitsa keyword (cyrillic) in item: '%s'", original_name[:50])
-            # Check in normalized text (transliteration)
-            elif any(keyword in normalized_lower for keyword in DARNITSA_KEYWORDS_LATIN):
-                has_darnitsa = True
-                LOGGER.debug("Found Darnitsa keyword (latin) in item: '%s'", normalized_name[:50])
+            # Check for Darnitsa in original text (Cyrillic) - use normalized comparison
+            matched_keyword = None
+            for i, keyword_normalized in enumerate(cyrillic_keywords_normalized):
+                if keyword_normalized in item_normalized:
+                    matched_keyword = DARNITSA_KEYWORDS_CYRILLIC[i]
+                    has_darnitsa = True
+                    LOGGER.info("Found Darnitsa keyword (cyrillic) '%s' in item: '%s'", matched_keyword, original_name[:50])
+                    break
+            # Check in transliterated text (Latin)
+            if not has_darnitsa:
+                for i, keyword_normalized in enumerate(latin_keywords_normalized):
+                    if keyword_normalized in item_transliterated:
+                        matched_keyword = DARNITSA_KEYWORDS_LATIN[i]
+                        has_darnitsa = True
+                        LOGGER.info("Found Darnitsa keyword (latin) '%s' in item: '%s'", matched_keyword, original_name[:50])
+                        break
             
             quantity = int(item.get("quantity", 1))
             price = item.get("price")
@@ -159,11 +196,21 @@ async def evaluate(payload: dict) -> None:
             )
         else:
             LOGGER.warning(
-                "Receipt %s REJECTED: reason=%s, line_items=%d, has_darnitsa=%s",
+                "Receipt %s REJECTED: reason=%s, line_items=%d, has_darnitsa=%s, merchant=%s",
                 receipt_id,
                 rejection_reason,
                 len(line_items),
                 has_darnitsa,
+                receipt.merchant[:50] if receipt.merchant else "None",
+            )
+            # Also log at INFO level for better visibility
+            LOGGER.info(
+                "Receipt %s REJECTED: reason=%s, line_items=%d, has_darnitsa=%s, merchant=%s",
+                receipt_id,
+                rejection_reason,
+                len(line_items),
+                has_darnitsa,
+                receipt.merchant[:50] if receipt.merchant else "None",
             )
         
         await session.commit()
