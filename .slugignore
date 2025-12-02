@@ -19,4 +19,11 @@ services/ocr_worker/Dockerfile
 services/easypay_mock/
 services/portmone_mock/
 services/ocr_mock/
+*.jpg
+*.jpeg
+*.png
+scripts/
+cabinet_main.js
+receipt_page.html
+runtime-es2015.js
 
