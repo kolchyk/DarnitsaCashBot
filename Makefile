@@ -1,20 +1,22 @@
 PYTHON ?= python
-POETRY ?= poetry
 
-.PHONY: install lint fmt test up down migrate
+.PHONY: install install-dev lint fmt test up down migrate
 
 install:
-	$(POETRY) install --sync
+	pip install -r requirements.txt
+
+install-dev:
+	pip install -r requirements-dev.txt
 
 lint:
-	$(POETRY) run ruff check .
-	$(POETRY) run mypy apps libs services
+	ruff check .
+	mypy apps libs services
 
 fmt:
-	$(POETRY) run ruff check . --fix
+	ruff check . --fix
 
 test:
-	$(POETRY) run pytest
+	pytest
 
 up:
 	docker compose up -d --build
@@ -23,5 +25,5 @@ down:
 	docker compose down
 
 migrate:
-	$(POETRY) run alembic upgrade head
+	alembic upgrade head
 

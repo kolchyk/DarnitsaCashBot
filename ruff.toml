@@ -1,0 +1,7 @@
+line-length = 100
+extend-select = ["I"]
+target-version = "py311"
+
+[lint.isort]
+known-first-party = ["apps", "libs", "services"]
+
