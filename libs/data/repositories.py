@@ -9,14 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from .models import BonusTransaction, CatalogItem, LineItem, Receipt, User
-from libs.common.crypto import Encryptor
 import hashlib
 
 
 class UserRepository:
-    def __init__(self, session: AsyncSession, encryptor: Encryptor | None = None) -> None:
+    def __init__(self, session: AsyncSession) -> None:
         self.session = session
-        self.encryptor = encryptor or Encryptor()
 
     async def upsert_user(
         self, telegram_id: int, phone_number: str | None, locale: str
@@ -24,15 +22,15 @@ class UserRepository:
         stmt = select(User).where(User.telegram_id == telegram_id)
         result = await self.session.execute(stmt)
         user = result.scalar_one_or_none()
-        encrypted, hashed = self._transform_phone(phone_number)
+        hashed = self._transform_phone(phone_number)
         if user:
-            user.phone_number = encrypted or user.phone_number
+            user.phone_number = phone_number or user.phone_number
             user.phone_hash = hashed or user.phone_hash
             user.locale = locale
         else:
             user = User(
                 telegram_id=telegram_id,
-                phone_number=encrypted,
+                phone_number=phone_number,
                 phone_hash=hashed,
                 locale=locale,
             )
@@ -48,14 +46,12 @@ class UserRepository:
     def decrypt_phone(self, user: User) -> str | None:
         if not user.phone_number:
             return None
-        return self.encryptor.decrypt(user.phone_number)
+        return user.phone_number
 
-    def _transform_phone(self, phone_number: str | None) -> tuple[str | None, str | None]:
+    def _transform_phone(self, phone_number: str | None) -> str | None:
         if not phone_number:
-            return None, None
-        encrypted = self.encryptor.encrypt(phone_number)
-        hashed = hashlib.sha256(phone_number.encode("utf-8")).hexdigest()
-        return encrypted, hashed
+            return None
+        return hashlib.sha256(phone_number.encode("utf-8")).hexdigest()
 
 
 class ReceiptRepository:
@@ -144,4 +140,25 @@ class BonusRepository:
         self.session.add(bonus)
         await self.session.flush()
         return bonus
+
+
+class StatisticsRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def get_statistics(self) -> dict[str, int]:
+        """Get system statistics: user count, receipt count, bonus transaction count."""
+        user_count_stmt = select(func.count(User.id))
+        receipt_count_stmt = select(func.count(Receipt.id))
+        bonus_count_stmt = select(func.count(BonusTransaction.id))
+        
+        user_result = await self.session.execute(user_count_stmt)
+        receipt_result = await self.session.execute(receipt_count_stmt)
+        bonus_result = await self.session.execute(bonus_count_stmt)
+        
+        return {
+            "user_count": user_result.scalar_one() or 0,
+            "receipt_count": receipt_result.scalar_one() or 0,
+            "bonus_count": bonus_result.scalar_one() or 0,
+        }
 

@@ -57,3 +57,9 @@ class ManualReceiptDataRequest(BaseModel):
     purchase_date: str | None = None  # ISO format date string
     line_items: list[dict[str, Any]]  # List of items with name, quantity, price
 
+
+class StatisticsResponse(BaseModel):
+    user_count: int
+    receipt_count: int
+    bonus_count: int
+

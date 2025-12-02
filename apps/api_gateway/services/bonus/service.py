@@ -9,7 +9,6 @@ from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt,
 
 from libs.common import AppSettings, get_settings
 from libs.common.analytics import AnalyticsClient
-from libs.common.crypto import Encryptor
 from libs.common.portmone import (
     PortmoneDirectClient,
     PortmoneResponse,
@@ -38,14 +37,12 @@ async def trigger_payout_for_receipt(receipt_id: UUID) -> None:
     """Convenience helper used when the API runs as a single process."""
     settings = get_settings()
     analytics = AnalyticsClient(settings)
-    encryptor = Encryptor(settings)
     client = PortmoneDirectClient(settings)
     try:
         await trigger_payout(
             payload={"receipt_id": str(receipt_id), "status": ReceiptStatus.ACCEPTED},
             analytics=analytics,
             client=client,
-            encryptor=encryptor,
             settings=settings,
         )
     finally:
@@ -56,14 +53,13 @@ async def trigger_payout(
     payload: dict,
     analytics: AnalyticsClient,
     client: PortmoneDirectClient,
-    encryptor: Encryptor,
     settings: AppSettings,
 ) -> None:
     if payload.get("status") != ReceiptStatus.ACCEPTED:
         return
 
     receipt_id = UUID(payload["receipt_id"])
-    context = await _prepare_bonus_context(receipt_id, encryptor, settings)
+    context = await _prepare_bonus_context(receipt_id, settings)
     if not context:
         return
 
@@ -121,7 +117,6 @@ async def trigger_payout(
 
 async def _prepare_bonus_context(
     receipt_id: UUID,
-    encryptor: Encryptor,
     settings: AppSettings,
 ) -> BonusContext | None:
     async with async_session_factory() as session:
@@ -130,7 +125,7 @@ async def _prepare_bonus_context(
             return None
         await session.refresh(receipt, attribute_names=["user", "bonus_transaction"])
         user: User | None = receipt.user
-        phone = encryptor.decrypt(user.phone_number) if user and user.phone_number else None
+        phone = user.phone_number if user and user.phone_number else None
         if not phone:
             return None
 

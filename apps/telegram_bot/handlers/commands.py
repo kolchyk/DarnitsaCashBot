@@ -91,6 +91,26 @@ async def handle_menu_history(message: Message, receipt_client: ReceiptApiClient
     await cmd_history(message, receipt_client)
 
 
+@router.message(F.text == "📊 Статистика")
+async def handle_menu_statistics(message: Message, receipt_client: ReceiptApiClient):
+    """Обработчик кнопки меню 'Статистика'"""
+    try:
+        stats = await receipt_client.get_statistics()
+        stats_text = (
+            "📊 <b>Статистика системи</b>\n\n"
+            f"👥 Користувачів: {stats.get('user_count', 0)}\n"
+            f"🧾 Чеків: {stats.get('receipt_count', 0)}\n"
+            f"💰 Нарахувань: {stats.get('bonus_count', 0)}"
+        )
+        await message.answer(stats_text, reply_markup=main_menu_keyboard(), parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error fetching statistics: {e}", exc_info=True)
+        await message.answer(
+            "Вибачте, не вдалося отримати статистику. Спробуйте пізніше.",
+            reply_markup=main_menu_keyboard(),
+        )
+
+
 @router.message(F.text == "ℹ️ Допомога")
 async def handle_menu_help(message: Message):
     """Обработчик кнопки меню 'Помощь'"""
@@ -146,6 +166,7 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
                 KeyboardButton(text="📋 Історія чеків"),
             ],
             [
+                KeyboardButton(text="📊 Статистика"),
                 KeyboardButton(text="ℹ️ Допомога"),
             ],
         ],

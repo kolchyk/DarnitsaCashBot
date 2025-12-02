@@ -18,7 +18,7 @@ from libs.common.constants import MAX_FILE_SIZE, SUPPORTED_CONTENT_TYPES
 from libs.common.rate_limit import RateLimiter
 from libs.common.storage import StorageClient
 from libs.data.models import LineItem, Receipt
-from libs.data.repositories import ReceiptRepository, UserRepository
+from libs.data.repositories import ReceiptRepository, StatisticsRepository, UserRepository
 
 from ..exceptions import EncryptionError
 from ..dependencies import (
@@ -35,6 +35,7 @@ from ..schemas import (
     ReceiptHistoryItem,
     ReceiptResponse,
     ReceiptUploadResponse,
+    StatisticsResponse,
     UserResponse,
     UserUpsertRequest,
 )
@@ -464,4 +465,16 @@ async def get_history(
     # Commit read-only transaction to avoid ROLLBACK log noise
     await session.commit()
     return history
+
+
+@router.get("/statistics", response_model=StatisticsResponse)
+async def get_statistics(
+    session: AsyncSession = Depends(get_session_dep),
+):
+    """Get system statistics: user count, receipt count, bonus transaction count."""
+    stats_repo = StatisticsRepository(session)
+    stats = await stats_repo.get_statistics()
+    # Commit read-only transaction to avoid ROLLBACK log noise
+    await session.commit()
+    return StatisticsResponse(**stats)
 

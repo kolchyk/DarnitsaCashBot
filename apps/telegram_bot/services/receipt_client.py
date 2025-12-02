@@ -98,3 +98,9 @@ class ReceiptApiClient:
         response.raise_for_status()
         return response.json()
 
+    async def get_statistics(self) -> dict[str, Any]:
+        """Get system statistics."""
+        response = await self._client.get("/bot/statistics")
+        response.raise_for_status()
+        return response.json()
+
