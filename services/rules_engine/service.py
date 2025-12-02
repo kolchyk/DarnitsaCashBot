@@ -6,15 +6,12 @@ import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from libs.common import configure_logging, get_settings, has_darnitsa_prefix
-from libs.common.analytics import AnalyticsClient
+from libs.common import has_darnitsa_prefix
 from libs.common.constants import ELIGIBILITY_WINDOW_DAYS, MAX_RECEIPTS_PER_DAY
-from libs.common.crypto import Encryptor
-from libs.common.events import EVENT_RECEIPT_ACCEPTED, Event, get_event_bus
-from libs.common.portmone import PortmoneDirectClient
 from libs.data import async_session_factory
 from libs.data.models import LineItem, Receipt
 from libs.data.repositories import ReceiptRepository
+from services.bonus_service.main import trigger_payout_for_receipt
 
 LOGGER = logging.getLogger(__name__)
 
@@ -168,18 +165,8 @@ async def evaluate(payload: dict) -> None:
         
         await session.commit()
         
-        # Publish event if receipt was accepted
         if receipt.status == "accepted":
-            event_bus = get_event_bus()
-            await event_bus.publish(
-                Event(
-                    event_type=EVENT_RECEIPT_ACCEPTED,
-                    payload={
-                        "receipt_id": str(receipt_id),
-                        "status": "accepted",
-                    },
-                )
-            )
+            await trigger_payout_for_receipt(receipt.id)
 
 
 # Worker functions removed - rules evaluation is now triggered directly via evaluate()

@@ -411,17 +411,7 @@ async for attempt in AsyncRetrying(
 
 ### Mock-сервер для локального тестирования
 
-Запустите mock-сервер:
-
-```bash
-docker compose up portmone-mock
-```
-
-Установите переменную окружения для использования mock:
-
-```bash
-PORTMONE_API_BASE=http://localhost:8082/api/directcash/
-```
+Отдельный Docker-мок удалён из репозитория вместе с другими вспомогательными сервисами. Для локальных проверок використовуйте sandbox обліковку PortmoneDirect або замініть `PORTMONE_API_BASE` на тестовий стенд, наданий Portmone.
 
 ### Тестирование с реальным API
 

@@ -56,6 +56,7 @@ class AppSettings(BaseSettings):
     storage_access_key: str = Field(default="miniokey", alias="STORAGE_ACCESS_KEY")
     storage_secret_key: str = Field(default="miniopass", alias="STORAGE_SECRET_KEY")
     storage_region: str = Field(default="us-east-1", alias="STORAGE_REGION")
+    storage_base_dir: str = Field(default="storage", alias="STORAGE_BASE_DIR")
 
     redis_host: str = Field(default="localhost", alias="REDIS_HOST")
     redis_port: int = Field(default=6379, alias="REDIS_PORT")

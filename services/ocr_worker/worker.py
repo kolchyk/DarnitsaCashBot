@@ -21,6 +21,9 @@ from libs.data.repositories import CatalogRepository
 
 from .qr_scanner import QRCodeNotFoundError, detect_qr_code
 from .receipt_scraper import ScrapingError, scrape_receipt_data
+from .preprocess import preprocess_image, UnreadableImageError
+from .tesseract_runner import TesseractRunner, TesseractRuntimeError
+from .postprocess import build_structured_payload
 
 LOGGER = logging.getLogger(__name__)
 
@@ -55,29 +58,44 @@ async def process_message(payload: dict) -> None:
             
             LOGGER.info("QR code detected for receipt %s: url=%s", receipt_id, qr_url)
             
-            # Step 2: Scrape receipt data from URL
+            # Step 2: Try to scrape receipt data from URL
             LOGGER.debug("Starting receipt scraping for receipt %s", receipt_id)
-            scraped_data = await asyncio.to_thread(scrape_receipt_data, qr_url)
-            LOGGER.info(
-                "Scraping completed for receipt %s: merchant=%s, line_items=%d, total=%s",
-                receipt_id,
-                scraped_data.get("merchant"),
-                len(scraped_data.get("line_items", [])),
-                scraped_data.get("total"),
-            )
+            scraped_data = None
+            try:
+                scraped_data = await asyncio.to_thread(scrape_receipt_data, qr_url)
+                items_count = len(scraped_data.get("line_items", []))
+                LOGGER.info(
+                    "Scraping completed for receipt %s: merchant=%s, line_items=%d, total=%s",
+                    receipt_id,
+                    scraped_data.get("merchant"),
+                    items_count,
+                    scraped_data.get("total"),
+                )
+                
+                # If scraping didn't find items, fallback to OCR
+                if items_count == 0:
+                    LOGGER.warning(
+                        "Scraping found 0 items for receipt %s, falling back to OCR",
+                        receipt_id,
+                    )
+                    scraped_data = None
+            except ScrapingError as exc:
+                LOGGER.warning(
+                    "Scraping failed for receipt %s: %s, falling back to OCR",
+                    receipt_id,
+                    exc,
+                )
+                scraped_data = None
+            
+            # Step 2b: Fallback to OCR if scraping failed or found no items
+            if scraped_data is None:
+                LOGGER.info("Using OCR fallback for receipt %s", receipt_id)
+                scraped_data = await _process_with_ocr(image_bytes, settings, session)
             
         except QRCodeNotFoundError as exc:
             LOGGER.warning("QR code not found for receipt %s: %s", receipt_id, exc, exc_info=True)
             receipt.status = ReceiptStatus.REJECTED
             failure_payload = {"error": str(exc), "type": "qr_code_not_found"}
-            receipt.ocr_payload = failure_payload
-            await session.commit()
-            await _publish_failure(payload, failure_payload)
-            return
-        except ScrapingError as exc:
-            LOGGER.error("Scraping failure for receipt %s: %s", receipt_id, exc, exc_info=True)
-            receipt.status = ReceiptStatus.REJECTED
-            failure_payload = {"error": str(exc), "type": "scraping_failed"}
             receipt.ocr_payload = failure_payload
             await session.commit()
             await _publish_failure(payload, failure_payload)
@@ -236,6 +254,48 @@ def _similarity(a: str, b: str) -> float:
     return 1 - (distance / max_len)
 
 
+async def _process_with_ocr(
+    image_bytes: bytes,
+    settings: Any,
+    session: Any,
+) -> dict[str, Any]:
+    """Process receipt image using OCR as fallback when scraping fails."""
+    LOGGER.info("Processing receipt with OCR")
+    
+    # Step 1: Preprocess image
+    preprocess_result = await asyncio.to_thread(preprocess_image, image_bytes, save_intermediates=False)
+    
+    # Step 2: Run Tesseract OCR
+    runner = TesseractRunner(settings)
+    tesseract_result = await asyncio.to_thread(runner.run, preprocess_result)
+    
+    # Step 3: Load catalog for SKU matching
+    from libs.data.repositories import CatalogRepository
+    catalog_repo = CatalogRepository(session)
+    catalog = await catalog_repo.list_active()
+    catalog_aliases = {
+        item.sku_code: [alias.lower() for alias in item.product_aliases] for item in catalog
+    }
+    
+    # Step 4: Build structured payload
+    structured_payload = build_structured_payload(
+        preprocess_metadata=preprocess_result.metadata,
+        tesseract_stats=tesseract_result.stats,
+        tokens_by_profile=tesseract_result.tokens_by_profile,
+        catalog_aliases=catalog_aliases,
+        settings=settings,
+    )
+    
+    LOGGER.info(
+        "OCR processing completed: merchant=%s, line_items=%d, total=%s",
+        structured_payload.get("merchant"),
+        len(structured_payload.get("line_items", [])),
+        structured_payload.get("total"),
+    )
+    
+    return structured_payload
+
+
 async def _publish_failure(payload: dict, failure_payload: dict) -> None:
     # RabbitMQ removed - failures are now stored in database only
     pass
@@ -246,9 +306,9 @@ def run_worker():
     """
     Entry point for ocr-worker script.
     
-    Note: This worker now processes receipts via QR code detection and web scraping
-    instead of OCR. The actual processing happens via process_message() which is
-    called directly from the API gateway.
+    Note: This worker processes receipts via QR code detection first, then tries web scraping.
+    If scraping fails or finds no items, it falls back to OCR for reliable data extraction.
+    The actual processing happens via process_message() which is called directly from the API gateway.
     """
     LOGGER.info("QR code worker entry point - processing is triggered via process_message()")
     # Worker loop removed - processing is now triggered directly from API gateway

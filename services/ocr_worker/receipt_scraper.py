@@ -9,9 +9,9 @@ from typing import Any
 import httpx
 from pendulum import parse as parse_datetime
 
-# Optional import for JavaScript rendering
+# Optional import for browser automation
 try:
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
@@ -92,12 +92,13 @@ def scrape_receipt_data(url: str) -> dict[str, Any]:
     LOGGER.info("Starting receipt scraping: url=%s", url)
     
     try:
-        # Try to fetch with JavaScript rendering first (for Angular apps)
+        # Try to fetch with browser automation first (for Angular apps with button clicks)
         html_content = None
         if PLAYWRIGHT_AVAILABLE:
             try:
-                html_content = _fetch_with_playwright(url)
-                LOGGER.debug("Page fetched with Playwright: content_length=%d", len(html_content) if html_content else 0)
+                html_content = _fetch_with_playwright_and_search(url)
+                if html_content:
+                    LOGGER.debug("Page fetched with Playwright (after search): content_length=%d", len(html_content))
             except Exception as e:
                 LOGGER.debug("Playwright fetch failed, falling back to httpx: %s", e)
         
@@ -370,8 +371,16 @@ def _extract_total(page_text: str, line_items: list[dict[str, Any]]) -> int | No
     return None
 
 
-def _fetch_with_playwright(url: str) -> str | None:
-    """Fetch page content using Playwright to execute JavaScript."""
+def _fetch_with_playwright_and_search(url: str) -> str | None:
+    """
+    Fetch page content using Playwright, click 'пошук' button and wait for receipt data.
+    
+    Args:
+        url: URL to the receipt page
+        
+    Returns:
+        HTML content after clicking search button, or None if failed
+    """
     if not PLAYWRIGHT_AVAILABLE:
         return None
     
@@ -379,15 +388,75 @@ def _fetch_with_playwright(url: str) -> str | None:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
+            
+            # Navigate to page
+            LOGGER.debug("Navigating to URL with Playwright: %s", url)
             page.goto(url, wait_until="networkidle", timeout=30000)
             
-            # Wait for content to load
-            page.wait_for_timeout(3000)  # Wait 3 seconds for Angular to render
+            # Wait for page to load
+            page.wait_for_timeout(2000)  # Wait 2 seconds for Angular to initialize
             
-            # Try to extract data from page
+            # Try to find and click "пошук" button
+            # Possible button texts: "пошук", "Пошук", "ПОШУК", "Search", etc.
+            search_button_selectors = [
+                'button:has-text("пошук")',
+                'button:has-text("Пошук")',
+                'button:has-text("ПОШУК")',
+                'button:has-text("поиск")',
+                'button:has-text("Поиск")',
+                'button[type="submit"]',
+                'input[type="submit"][value*="пошук"]',
+                'input[type="submit"][value*="Пошук"]',
+                '.btn-search',
+                '#search-button',
+                '[class*="search"]',
+                '[class*="Search"]',
+            ]
+            
+            button_clicked = False
+            for selector in search_button_selectors:
+                try:
+                    button = page.locator(selector).first
+                    if button.is_visible(timeout=5000):
+                        LOGGER.debug("Found search button with selector: %s", selector)
+                        button.click()
+                        button_clicked = True
+                        LOGGER.debug("Clicked search button")
+                        break
+                except Exception:
+                    continue
+            
+            if not button_clicked:
+                # Try to find button by Ukrainian text
+                try:
+                    button = page.get_by_text("пошук", exact=False).first
+                    if button.is_visible(timeout=5000):
+                        button.click()
+                        button_clicked = True
+                        LOGGER.debug("Clicked search button by text")
+                except Exception:
+                    pass
+            
+            if button_clicked:
+                # Wait for receipt data to load
+                LOGGER.debug("Waiting for receipt data to load...")
+                page.wait_for_timeout(5000)  # Wait 5 seconds for data to load
+                
+                # Try to wait for specific elements that indicate receipt is loaded
+                try:
+                    # Wait for table or receipt content
+                    page.wait_for_selector('table, .receipt, .check-content, [class*="item"]', timeout=10000)
+                    LOGGER.debug("Receipt content detected")
+                except PlaywrightTimeoutError:
+                    LOGGER.debug("Receipt content timeout, but continuing...")
+            
+            # Get final HTML content
             html_content = page.content()
             browser.close()
+            
             return html_content
+            
     except Exception as e:
-        LOGGER.warning("Playwright fetch failed: %s", e)
+        LOGGER.warning("Playwright automation failed: %s", e)
         return None
+

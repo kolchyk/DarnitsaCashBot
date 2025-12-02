@@ -53,16 +53,6 @@ heroku config:get DATABASE_URL --app darnitsacashbot-b132719cee1f
    heroku logs --tail --app darnitsacashbot-b132719cee1f
    ```
 
-## Дополнительные аддоны
-
-Если вам также нужны другие сервисы:
-
-### Redis
-```bash
-heroku addons:create heroku-redis:mini --app darnitsacashbot-b132719cee1f
-```
-
-
 ## Проверка подключения
 
 После установки PostgreSQL и выполнения миграций, проверьте работу приложения:

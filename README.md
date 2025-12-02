@@ -7,11 +7,11 @@
 ```text
 apps/              # Користувацькі точки входу (Telegram бот, HTTP API)
 libs/              # Спільні бібліотеки (конфігурація, доступ до даних, допоміжні функції)
-services/          # Фонові воркери (OCR, правила, виплати, моки)
+services/          # Функціональні модулі (OCR, правила, виплати)
 alembic/           # Міграції бази даних
 scripts/           # Допоміжні скрипти для розробки та тестування
 docs/              # Документація проекту
-docker-compose.yml # Локальна інфраструктура: Postgres, Redis, MinIO, моки
+docker-compose.yml # Локальна інфраструктура: Postgres (опційно)
 ```
 
 ## Швидкий старт
@@ -32,7 +32,7 @@ poetry install
 # Копіювання прикладу конфігурації (якщо є)
 # cp env.example .env
 
-# Запуск інфраструктури (Postgres, Redis, MinIO)
+# Запуск інфраструктури (Postgres)
 make up
 
 # Застосування міграцій бази даних
@@ -69,10 +69,6 @@ poetry run python -m apps.telegram_bot.main
 
 3. **Перевірка підключення**: Використовуйте скрипт `python scripts/check_portmone_api.py` для перевірки підключення до API та коректності облікових даних.
 
-### Тестування з моком
-
-`docker compose up portmone-mock` надає доступ до `http://localhost:8082/api/directcash/`, що дозволяє проводити end-to-end тести без звернення до реального API. Встановіть `PORTMONE_API_BASE` на цю URL в `.env`.
-
 ### Webhook
 
 FastAPI gateway надає ендпоінт `POST /portmone/webhook`. Захистіть його через `PORTMONE_WEBHOOK_TOKEN` та налаштуйте той самий токен на стороні Portmone.
@@ -81,7 +77,7 @@ FastAPI gateway надає ендпоінт `POST /portmone/webhook`. Захис
 
 Виплати бонусів організовані через Portmone клієнт у `services/bonus_service`. Метрики Prometheus (`portmone_request_total`, `portmone_fail_total{code}`, `portmone_request_latency_seconds`) моніторять стан інтеграції.
 
-## Налаштування OCR Worker
+## OCR пайплайн
 
 ### Встановлення Tesseract
 
@@ -98,19 +94,9 @@ FastAPI gateway надає ендпоінт `POST /portmone/webhook`. Захис
 - `OCR_AUTO_ACCEPT_THRESHOLD`, `OCR_MANUAL_REVIEW_THRESHOLD`, `OCR_TOTALS_TOLERANCE_PERCENT`
 - `OCR_STORAGE_PREFIX`, `OCR_ARTIFACT_TTL_DAYS`, `OCR_SAVE_PREPROCESSED`
 
-### Запуск воркера
+### Використання
 
-```bash
-# Локально
-poetry run ocr-worker
-
-# Через Docker
-docker compose up ocr-worker
-```
-
-### Артефакти
-
-Артефакти (вирівняні TIFF, сирі TSV дампи) зберігаються під налаштованим префіксом сховища протягом 90 днів для задоволення вимог аудиту, описаних у `docs/OCR.md`.
+OCR запускається безпосередньо з ендпоінта `/bot/receipts`, тому окремі воркери та Docker-сервіси більше не потрібні. Переконайтеся, що Tesseract встановлений у середовищі, де працює API Gateway.
 
 ## Якість коду
 
@@ -126,7 +112,6 @@ docker compose up ocr-worker
 ```bash
 heroku create your-app-name
 heroku addons:create heroku-postgresql:mini
-heroku addons:create heroku-redis:mini
 
 # Налаштування buildpack для встановлення системних залежностей (Tesseract OCR)
 # Файл .buildpacks вже містить необхідні buildpack, але якщо потрібно налаштувати вручну:
@@ -136,7 +121,7 @@ heroku buildpacks:set heroku/python --index 2
 heroku config:set TELEGRAM_BOT_TOKEN=your_token ENCRYPTION_SECRET=your_secret
 git push heroku main
 heroku run alembic upgrade head
-heroku ps:scale web=1 worker=1
+heroku ps:scale web=1
 ```
 
 **Важливо**: Проект використовує `Aptfile` для встановлення Tesseract OCR та інших системних залежностей. Файл `.buildpacks` автоматично налаштовує необхідний buildpack. Якщо після деплою виникає помилка `TesseractNotFoundError`, переконайтеся, що buildpack встановлено правильно:
@@ -188,12 +173,6 @@ heroku run python -c "import os; print('TESSDATA_PREFIX:', os.environ.get('TESSD
 - **OCR Worker** (`services/ocr_worker`) — воркер для обробки зображень чеків
 - **Bonus Service** (`services/bonus_service`) — сервіс для виплати бонусів
 - **Rules Engine** (`services/rules_engine`) — движок правил для валідації чеків
-
-### Моки для тестування
-
-- `portmone-mock` — мок PortmoneDirect API (порт 8082)
-- `easypay-mock` — мок Easypay API (порт 8080)
-- `ocr-mock` — мок OCR сервісу (порт 8081)
 
 ## Ключова документація
 

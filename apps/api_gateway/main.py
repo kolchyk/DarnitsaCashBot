@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from contextlib import asynccontextmanager
 import uuid
 
@@ -9,9 +8,6 @@ from fastapi import FastAPI, Request, Response
 
 from libs.common import configure_logging, get_settings
 from libs.common.logging import set_correlation_id
-from libs.common.notifications import NotificationService
-
-from .background import bonus_event_listener
 from .exception_handlers import (
     database_connection_error_handler,
     database_error_handler,
@@ -33,7 +29,6 @@ async def lifespan(app: FastAPI):
     import logging
     logger = logging.getLogger(__name__)
     
-    settings = get_settings()
     # Startup
     # Check database connection
     try:
@@ -48,21 +43,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to connect to database: {e}", exc_info=True)
         logger.warning("Application will start but database operations may fail")
     
-    notification_service = NotificationService(settings)
-    app.state.notification_service = notification_service
-    app.state.background_tasks = [
-        asyncio.create_task(bonus_event_listener(notification_service)),
-    ]
-    
     yield
-    
-    # Shutdown
-    for task in getattr(app.state, "background_tasks", []):
-        task.cancel()
-    await asyncio.gather(*getattr(app.state, "background_tasks", []), return_exceptions=True)
-    notification_service: NotificationService | None = getattr(app.state, "notification_service", None)
-    if notification_service:
-        await notification_service.bot.session.close()
 
 
 def create_app() -> FastAPI:

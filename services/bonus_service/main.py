@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
@@ -9,7 +7,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from libs.common import AppSettings, configure_logging, get_settings
+from libs.common import AppSettings, get_settings
 from libs.common.analytics import AnalyticsClient
 from libs.common.crypto import Encryptor
 from libs.common.portmone import (
@@ -34,6 +32,24 @@ class BonusContext:
     contract_number: str
     currency: str
     telegram_id: int | None
+
+
+async def trigger_payout_for_receipt(receipt_id: UUID) -> None:
+    """Convenience helper used when the API runs as a single process."""
+    settings = get_settings()
+    analytics = AnalyticsClient(settings)
+    encryptor = Encryptor(settings)
+    client = PortmoneDirectClient(settings)
+    try:
+        await trigger_payout(
+            payload={"receipt_id": str(receipt_id), "status": ReceiptStatus.ACCEPTED},
+            analytics=analytics,
+            client=client,
+            encryptor=encryptor,
+            settings=settings,
+        )
+    finally:
+        await client.aclose()
 
 
 async def trigger_payout(
