@@ -2,27 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
-import unicodedata
 from datetime import datetime
 from typing import Any
 from uuid import UUID
-
-from Levenshtein import distance as levenshtein_distance
-from unidecode import unidecode
 
 from libs.common import get_settings
 from libs.common.darnitsa import has_darnitsa_prefix
 from libs.common.storage import StorageClient
 from libs.data import async_session_factory
 from libs.data.models import Receipt, ReceiptStatus
-from libs.data.repositories import CatalogRepository
 
 from .qr_scanner import QRCodeNotFoundError, detect_qr_code
 from .receipt_scraper import ScrapingError, scrape_receipt_data
-from .preprocess import preprocess_image, UnreadableImageError
-from .tesseract_runner import TesseractRunner, TesseractRuntimeError
-from .postprocess import build_structured_payload
 
 LOGGER = logging.getLogger(__name__)
 
@@ -71,25 +62,20 @@ async def process_message(payload: dict) -> None:
                     scraped_data.get("total"),
                 )
                 
-                # If scraping didn't find items, fallback to OCR
+                # If scraping didn't find items, reject receipt
                 if items_count == 0:
                     LOGGER.warning(
-                        "Scraping found 0 items for receipt %s, falling back to OCR",
+                        "Scraping found 0 items for receipt %s, rejecting",
                         receipt_id,
                     )
-                    scraped_data = None
+                    raise ScrapingError("No items found in receipt")
             except ScrapingError as exc:
-                LOGGER.warning(
-                    "Scraping failed for receipt %s: %s, falling back to OCR",
+                LOGGER.error(
+                    "Scraping failed for receipt %s: %s",
                     receipt_id,
                     exc,
                 )
-                scraped_data = None
-            
-            # Step 2b: Fallback to OCR if scraping failed or found no items
-            if scraped_data is None:
-                LOGGER.info("Using OCR fallback for receipt %s", receipt_id)
-                scraped_data = await _process_with_ocr(image_bytes, settings, session)
+                raise
             
         except QRCodeNotFoundError as exc:
             LOGGER.warning("QR code not found for receipt %s: %s", receipt_id, exc, exc_info=True)
@@ -108,24 +94,24 @@ async def process_message(payload: dict) -> None:
             await _publish_failure(payload, failure_payload)
             return
 
-        # Step 3: Load catalog and enrich line items with SKU matching
-        catalog_repo = CatalogRepository(session)
-        catalog = await catalog_repo.list_active()
-        catalog_aliases = {
-            item.sku_code: [alias.lower() for alias in item.product_aliases] for item in catalog
-        }
-        LOGGER.info(
-            "Loaded catalog for receipt %s: active_items=%d, total_aliases=%d",
-            receipt_id,
-            len(catalog),
-            sum(len(aliases) for aliases in catalog_aliases.values()),
-        )
-
-        # Enrich scraped line items with SKU matching and Darnitsa detection
-        LOGGER.debug("Enriching line items with SKU matching for receipt %s", receipt_id)
+        # Step 3: Enrich scraped line items with Darnitsa detection
+        LOGGER.debug("Enriching line items with Darnitsa detection for receipt %s", receipt_id)
         enriched_line_items = []
         for item in scraped_data.get("line_items", []):
-            enriched_item = _enrich_line_item(item, catalog_aliases)
+            original_name = item.get("name", "")
+            is_darnitsa = has_darnitsa_prefix(original_name)
+            
+            enriched_item = {
+                "name": original_name,
+                "original_name": original_name,
+                "normalized_name": original_name.upper(),
+                "quantity": item.get("quantity", 1),
+                "price": item.get("price"),
+                "confidence": item.get("confidence", 1.0),
+                "sku_code": item.get("sku_code"),
+                "sku_match_score": item.get("sku_match_score", 0.0),
+                "is_darnitsa": is_darnitsa,
+            }
             enriched_line_items.append(enriched_item)
         
         scraped_data["line_items"] = enriched_line_items
@@ -134,17 +120,13 @@ async def process_message(payload: dict) -> None:
         if enriched_line_items:
             LOGGER.debug("Enriched line items for receipt %s:", receipt_id)
             for idx, item in enumerate(enriched_line_items, 1):
-                sku_info = f", sku={item.get('sku_code')}" if item.get("sku_code") else ""
-                sku_score = f", sku_score={item.get('sku_match_score', 0):.3f}" if item.get("sku_match_score") else ""
                 darnitsa_info = ", is_darnitsa=True" if item.get("is_darnitsa") else ""
                 LOGGER.debug(
-                    "  Item %d: name='%s', quantity=%d, price=%s%s%s%s",
+                    "  Item %d: name='%s', quantity=%d, price=%s%s",
                     idx,
                     item.get("name", "")[:50],
                     item.get("quantity", 0),
                     item.get("price"),
-                    sku_info,
-                    sku_score,
                     darnitsa_info,
                 )
 
@@ -185,114 +167,6 @@ async def process_message(payload: dict) -> None:
             str(e),
             exc_info=True,
         )
-
-
-def _enrich_line_item(item: dict[str, Any], catalog_aliases: dict[str, list[str]]) -> dict[str, Any]:
-    """Enrich a scraped line item with SKU matching and Darnitsa detection."""
-    original_name = item.get("name", "")
-    normalized_name = _normalize_text(original_name)
-    
-    # SKU matching
-    sku_code, sku_score = _match_sku(normalized_name, catalog_aliases)
-    
-    # Darnitsa detection
-    is_darnitsa = has_darnitsa_prefix(original_name) or has_darnitsa_prefix(normalized_name)
-    
-    enriched = {
-        "name": original_name,
-        "original_name": original_name,
-        "normalized_name": normalized_name,
-        "quantity": item.get("quantity", 1),
-        "price": item.get("price"),
-        "confidence": item.get("confidence", 1.0),
-        "sku_code": sku_code,
-        "sku_match_score": sku_score,
-        "is_darnitsa": is_darnitsa,
-    }
-    
-    return enriched
-
-
-def _normalize_text(text: str) -> str:
-    """Normalize text for SKU matching (same as postprocess.py)."""
-    normalized = unicodedata.normalize("NFC", text)
-    normalized = normalized.replace("₴", " грн ")
-    normalized = unidecode(normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return normalized.upper()
-
-
-def _match_sku(name: str, catalog_aliases: dict[str, list[str]]) -> tuple[str | None, float]:
-    """Match product name to SKU code using catalog aliases."""
-    best_score = 0.0
-    best_code: str | None = None
-    normalized = name.lower()
-    for sku_code, aliases in catalog_aliases.items():
-        for alias in aliases:
-            similarity = _similarity(normalized, alias.lower())
-            if similarity > best_score:
-                best_score = similarity
-                best_code = sku_code
-    
-    if best_score >= 0.75:
-        LOGGER.debug("SKU match found: name='%s' -> sku=%s, score=%.3f", name[:50], best_code, best_score)
-    else:
-        LOGGER.debug("No SKU match: name='%s', best_score=%.3f (threshold=0.75)", name[:50], best_score)
-    
-    return best_code, best_score
-
-
-def _similarity(a: str, b: str) -> float:
-    """Calculate similarity between two strings using Levenshtein distance."""
-    if not a or not b:
-        return 0.0
-    max_len = max(len(a), len(b))
-    if max_len == 0:
-        return 0.0
-    distance = levenshtein_distance(a, b)
-    return 1 - (distance / max_len)
-
-
-async def _process_with_ocr(
-    image_bytes: bytes,
-    settings: Any,
-    session: Any,
-) -> dict[str, Any]:
-    """Process receipt image using OCR as fallback when scraping fails."""
-    LOGGER.info("Processing receipt with OCR")
-    
-    # Step 1: Preprocess image
-    preprocess_result = await asyncio.to_thread(preprocess_image, image_bytes, save_intermediates=False)
-    
-    # Step 2: Run Tesseract OCR
-    runner = TesseractRunner(settings)
-    tesseract_result = await asyncio.to_thread(runner.run, preprocess_result)
-    
-    # Step 3: Load catalog for SKU matching
-    from libs.data.repositories import CatalogRepository
-    catalog_repo = CatalogRepository(session)
-    catalog = await catalog_repo.list_active()
-    catalog_aliases = {
-        item.sku_code: [alias.lower() for alias in item.product_aliases] for item in catalog
-    }
-    
-    # Step 4: Build structured payload
-    structured_payload = build_structured_payload(
-        preprocess_metadata=preprocess_result.metadata,
-        tesseract_stats=tesseract_result.stats,
-        tokens_by_profile=tesseract_result.tokens_by_profile,
-        catalog_aliases=catalog_aliases,
-        settings=settings,
-    )
-    
-    LOGGER.info(
-        "OCR processing completed: merchant=%s, line_items=%d, total=%s",
-        structured_payload.get("merchant"),
-        len(structured_payload.get("line_items", [])),
-        structured_payload.get("total"),
-    )
-    
-    return structured_payload
 
 
 async def _publish_failure(payload: dict, failure_payload: dict) -> None:
