@@ -75,7 +75,7 @@ async def cmd_history(message: Message, receipt_client: ReceiptApiClient):
         payout_status_translated = translate_status(payout_status) if payout_status != "-" else "-"
         uploaded_at_formatted = format_datetime_uk(item["uploaded_at"])
         lines.append(
-            f"- {status_translated} @ {uploaded_at_formatted} (Portmone: {reference}, статус: {payout_status_translated})"
+            f"- {status_translated} @ {uploaded_at_formatted} (Виплата: {reference}, статус: {payout_status_translated})"
         )
     await message.answer("\n".join(lines), reply_markup=main_menu_keyboard())
 
@@ -140,7 +140,7 @@ def onboarding_text(*, require_phone: bool, user_name: str = "") -> str:
             "Вітаємо в DarnitsaCashBot! 🎉\n\n"
             "Ми нараховуємо бонуси за препарати Дарниця. Потрібне фото чека.\n"
             "Переконайтеся, що на чеку є QR код.\n\n"
-            f"Поділіться номером телефону, щоб ми могли надсилати поповнення 1₴ PortmoneDirect за кожен прийнятий чек. {consent}"
+            f"Поділіться номером телефону, щоб ми могли надсилати поповнення 1₴ за кожен прийнятий чек. {consent}"
         )
     return (
         f"{greeting}\n\n"
@@ -177,7 +177,7 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
 
 def phone_prompt_text() -> str:
     return (
-        "Нам потрібен підтверджений номер телефону, щоб запустити виплати PortmoneDirect. "
+        "Нам потрібен підтверджений номер телефону, щоб запустити виплати. "
         "Натисніть кнопку нижче, щоб поділитися ним."
     )
 

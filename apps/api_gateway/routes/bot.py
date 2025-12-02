@@ -232,6 +232,13 @@ async def upload_receipt(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
+    # Check phone number is provided
+    if not user.phone_number:
+        raise HTTPException(
+            status_code=400,
+            detail="Phone number is required for payout. Please share your phone number using /change_phone command.",
+        )
+    
     # Validate file
     await _validate_upload_file(file)
     
@@ -458,7 +465,7 @@ async def get_history(
                 receipt_id=receipt.id,
                 status=receipt.status,
                 uploaded_at=receipt.upload_ts,
-                payout_reference=bonus.portmone_bill_id if bonus else None,
+                payout_reference=None,  # Payout provider integration removed
                 payout_status=bonus.payout_status if bonus else None,
             )
         )

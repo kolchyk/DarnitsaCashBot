@@ -32,13 +32,15 @@ async def lifespan(app: FastAPI):
     # Startup
     # Check database connection
     try:
-        from libs.data.database import get_async_session
+        from libs.data.database import async_session_factory
         from sqlalchemy import text
-        async for session in get_async_session():
+        async with async_session_factory() as session:
             # Try a simple query to verify connection
             await session.execute(text("SELECT 1"))
             logger.info("Database connection verified successfully")
-            break
+    except ImportError as e:
+        logger.error(f"Failed to import database module: {e}", exc_info=True)
+        logger.warning("Application will start but database operations may fail")
     except Exception as e:
         logger.error(f"Failed to connect to database: {e}", exc_info=True)
         logger.warning("Application will start but database operations may fail")
@@ -47,7 +49,23 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    settings = get_settings()
+    try:
+        settings = get_settings()
+    except Exception as e:
+        import logging
+        # Configure basic logging before settings are available
+        logging.basicConfig(
+            level=logging.ERROR,
+            format="%(asctime)s | %(levelname)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to load settings: {e}", exc_info=True)
+        logger.error("This is usually caused by missing required environment variables.")
+        logger.error("Required variables include: TELEGRAM_BOT_TOKEN, ENCRYPTION_SECRET")
+        # Re-raise to be caught by module-level handler
+        raise
+    
     configure_logging(settings.log_level)
     app = FastAPI(title="DarnitsaCashBot API", version="0.1.0", lifespan=lifespan)
     
@@ -79,7 +97,6 @@ def create_app() -> FastAPI:
             "endpoints": {
                 "health": "/healthz",
                 "bot": "/bot",
-                # "portmone": "/portmone",  # Temporarily disabled
                 "docs": "/docs",
                 "openapi": "/openapi.json"
             }
@@ -107,7 +124,30 @@ def create_app() -> FastAPI:
     return app
 
 
-app = create_app()
+# Create app at module level, but handle errors gracefully
+try:
+    app = create_app()
+except Exception as e:
+    import logging
+    import sys
+    # Configure basic logging before app is created
+    logging.basicConfig(
+        level=logging.ERROR,
+        format="%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    logger = logging.getLogger(__name__)
+    logger.error(f"Failed to create app: {e}", exc_info=True)
+    logger.error("Application cannot start. Please check your configuration.")
+    # Create a minimal app that returns an error for all requests
+    app = FastAPI(title="DarnitsaCashBot API - Error State")
+    
+    @app.get("/")
+    @app.post("/")
+    @app.get("/{path:path}")
+    @app.post("/{path:path}")
+    async def error_handler():
+        return {"error": "Application failed to start", "detail": str(e)}, 503
 
 
 def run():

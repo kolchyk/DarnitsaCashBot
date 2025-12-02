@@ -1,6 +1,6 @@
 # DarnitsaCashBot
 
-Платформа автоматизації, яка обробляє чеки з Telegram, валідує покупки Darnitsa та виконує поповнення через PortmoneDirect. Цей репозиторій відповідає специфікації [prd.md](docs/prd.md).
+Платформа автоматизації, яка обробляє чеки з Telegram та валідує покупки Darnitsa. Цей репозиторій відповідає специфікації [prd.md](docs/prd.md).
 
 ## Структура проекту
 
@@ -58,24 +58,6 @@ poetry run python -m apps.telegram_bot.main
 - `make up` — запуск інфраструктури через Docker Compose
 - `make down` — зупинка інфраструктури
 - `make migrate` — застосування міграцій Alembic
-
-## Налаштування PortmoneDirect
-
-### Підготовка
-
-1. Скопіюйте змінні `PORTMONE_*` з `env.example` (якщо є) та оновіть їх з обліковими даними та TLS-сертифікатом, виданим PortmoneDirect.
-
-2. **Налаштування Portmone API**: Повне керівництво з налаштування Portmone Direct API для поповнення мобільного телефона доступне в [docs/portmone_setup.md](docs/portmone_setup.md).
-
-3. **Перевірка підключення**: Використовуйте скрипт `python scripts/check_portmone_api.py` для перевірки підключення до API та коректності облікових даних.
-
-### Webhook
-
-FastAPI gateway надає ендпоінт `POST /portmone/webhook`. Захистіть його через `PORTMONE_WEBHOOK_TOKEN` та налаштуйте той самий токен на стороні Portmone.
-
-### Моніторинг
-
-Виплати бонусів організовані через Portmone клієнт у `services/bonus_service`. Метрики Prometheus (`portmone_request_total`, `portmone_fail_total{code}`, `portmone_request_latency_seconds`) моніторять стан інтеграції.
 
 ## OCR пайплайн
 
@@ -139,7 +121,6 @@ heroku ps:scale web=1
 
 - [PRD](docs/prd.md) — Product Requirements Document
 - [OCR](docs/OCR.md) — Документація по OCR обробці
-- [Portmone Setup](docs/portmone_setup.md) — Повне керівництво з налаштування Portmone Direct API для поповнення мобільного телефона
 - [Telegram Flow](docs/telegram_flow.md) — Опис потоку роботи з Telegram
 - [Heroku Database Inspection](docs/heroku_database_inspection.md) — Робота з базою даних на Heroku
 

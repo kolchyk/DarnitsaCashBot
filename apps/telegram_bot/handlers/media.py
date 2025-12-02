@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from uuid import uuid4
 
+import httpx
 from aiogram import Bot, F, Router
 from aiogram.types import Message
 
@@ -19,6 +20,30 @@ _pending_receipts: dict[int, str] = {}  # telegram_id -> receipt_id
 
 @router.message(F.photo)
 async def handle_receipt_photo(message: Message, receipt_client: ReceiptApiClient):
+    # Check if user has phone number before processing receipt
+    try:
+        user_info = await receipt_client.register_user(
+            telegram_id=message.from_user.id,
+            phone_number=None,
+            locale="uk",
+        )
+        if not user_info.get("has_phone"):
+            from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+            contact_keyboard = ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="Поділитися номером телефону", request_contact=True)]],
+                resize_keyboard=True,
+                one_time_keyboard=True,
+            )
+            await message.answer(
+                "⚠️ Для виплати бонусу нам потрібен ваш номер телефону.\n\n"
+                "Будь ласка, поділіться номером телефону, натиснувши кнопку нижче.",
+                reply_markup=contact_keyboard,
+            )
+            return
+    except Exception as e:
+        # If we can't check user info, proceed with upload and let API handle it
+        pass
+
     photo = message.photo[-1]
     if photo.file_size and photo.file_size > 10 * 1024 * 1024:
         await message.answer("Зображення чека перевищує 10 МБ. Надішліть менший файл.")
@@ -38,12 +63,30 @@ async def handle_receipt_photo(message: Message, receipt_client: ReceiptApiClien
         receipt_id = response["receipt"]["receipt_id"]
         status_translated = translate_status(response["receipt"]["status"])
         await message.answer(
-            f"Чек отримано. Виплата PortmoneDirect почнеться після підтвердження. Поточний статус: {status_translated}"
+            f"Чек отримано. Поточний статус: {status_translated}"
         )
         
         # Check receipt processing status after a delay
         bot = message.bot
         asyncio.create_task(check_receipt_status(message.from_user.id, receipt_id, receipt_client, bot))
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 400 and "phone" in e.response.text.lower():
+            from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+            contact_keyboard = ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="Поділитися номером телефону", request_contact=True)]],
+                resize_keyboard=True,
+                one_time_keyboard=True,
+            )
+            await message.answer(
+                "⚠️ Для виплати бонусу нам потрібен ваш номер телефону.\n\n"
+                "Будь ласка, поділіться номером телефону, натиснувши кнопку нижче.",
+                reply_markup=contact_keyboard,
+            )
+        else:
+            await message.answer(
+                f"❌ Помилка при завантаженні чека: {e.response.text}. "
+                "Будь ласка, спробуйте ще раз або зверніться до підтримки."
+            )
     except TimeoutError as e:
         await message.answer(
             "⏱️ Час очікування вичерпано при завантаженні чека. "
