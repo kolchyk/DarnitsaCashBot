@@ -68,7 +68,7 @@ known-first-party = ["apps", "libs", "services"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "-ra -q --maxfail=1 --cov=."
+addopts = "-ra -q --maxfail=1"
 
 [tool.mypy]
 plugins = ["pydantic.mypy"]

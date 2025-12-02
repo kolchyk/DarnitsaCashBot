@@ -61,6 +61,24 @@ class TesseractRunner:
             if detected_path:
                 pytesseract.pytesseract.tesseract_cmd = detected_path
                 LOGGER.info("Auto-detected tesseract at %s", detected_path)
+            else:
+                # Provide helpful error message
+                import platform
+                is_windows = platform.system() == "Windows"
+                if is_windows:
+                    error_msg = (
+                        "Tesseract OCR not found. Please install Tesseract from "
+                        "https://github.com/UB-Mannheim/tesseract/wiki or ensure it's in your PATH. "
+                        "Common installation paths: C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+                    )
+                else:
+                    error_msg = (
+                        "Tesseract OCR not found. Please install tesseract-ocr package "
+                        "(e.g., 'apt-get install tesseract-ocr' on Debian/Ubuntu or "
+                        "'brew install tesseract' on macOS) or ensure it's in your PATH."
+                    )
+                LOGGER.error(error_msg)
+                raise TesseractRuntimeError(error_msg)
         
         # Set TESSDATA_PREFIX - use configured value or auto-detect
         # Priority: 1) configured TESSDATA_DIR, 2) app tessdata_final (Heroku), 3) system paths
@@ -72,13 +90,14 @@ class TesseractRunner:
                 Path("tessdata_final"),  # Relative to current working directory
                 Path.cwd() / "tessdata_final",  # Explicitly relative to CWD
                 Path(__file__).parent.parent.parent / "tessdata_final",  # Relative to this file
+                Path(__file__).parent.parent.parent / "tessdata",  # Alternative location
             ]
             
             app_tessdata = None
             for path_candidate in possible_app_paths:
                 if path_candidate.exists() and any(path_candidate.glob("*.traineddata")):
                     app_tessdata = path_candidate
-                    LOGGER.info("Found tessdata_final at %s", app_tessdata)
+                    LOGGER.info("Found tessdata directory at %s", app_tessdata)
                     break
             
             if app_tessdata:
@@ -88,20 +107,67 @@ class TesseractRunner:
                 if not ukr_file.exists():
                     LOGGER.warning("Ukrainian language file not found at %s", ukr_file)
             else:
-                LOGGER.info("tessdata_final not found, trying system paths")
-                # Try system paths: versioned (Tesseract 5.x) then non-versioned
-                versioned_path = "/usr/share/tesseract-ocr/5/tessdata"
-                non_versioned_path = "/usr/share/tesseract-ocr/tessdata"
-                if Path(versioned_path).exists():
-                    tessdata_path = versioned_path
-                    LOGGER.info("Using system tessdata at %s", tessdata_path)
-                elif Path(non_versioned_path).exists():
-                    tessdata_path = non_versioned_path
-                    LOGGER.info("Using system tessdata at %s", tessdata_path)
+                LOGGER.info("Local tessdata not found, trying system paths")
+                import platform
+                is_windows = platform.system() == "Windows"
+                
+                if is_windows:
+                    # Windows paths - try to find tessdata relative to tesseract executable
+                    tesseract_exe = pytesseract.pytesseract.tesseract_cmd
+                    if tesseract_exe and Path(tesseract_exe).exists():
+                        # tessdata is usually in the same directory as tesseract.exe on Windows
+                        tesseract_dir = Path(tesseract_exe).parent
+                        tessdata_candidates = [
+                            tesseract_dir / "tessdata",
+                            tesseract_dir.parent / "tessdata",
+                        ]
+                        for candidate in tessdata_candidates:
+                            if candidate.exists() and any(candidate.glob("*.traineddata")):
+                                tessdata_path = str(candidate.absolute())
+                                LOGGER.info("Using Windows tessdata at %s", tessdata_path)
+                                break
+                    
+                    # If not found, try common Windows installation paths
+                    if not tessdata_path or not Path(tessdata_path).exists():
+                        common_windows_paths = [
+                            r"C:\Program Files\Tesseract-OCR\tessdata",
+                            r"C:\Program Files (x86)\Tesseract-OCR\tessdata",
+                            r"C:\Tesseract-OCR\tessdata",
+                            os.path.expanduser(r"~\AppData\Local\Programs\Tesseract-OCR\tessdata"),
+                        ]
+                        program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+                        program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+                        common_windows_paths.extend([
+                            os.path.join(program_files, "Tesseract-OCR", "tessdata"),
+                            os.path.join(program_files_x86, "Tesseract-OCR", "tessdata"),
+                        ])
+                        
+                        for path_str in common_windows_paths:
+                            path_obj = Path(path_str)
+                            if path_obj.exists() and any(path_obj.glob("*.traineddata")):
+                                tessdata_path = str(path_obj.absolute())
+                                LOGGER.info("Using Windows tessdata at %s", tessdata_path)
+                                break
+                    
+                    if not tessdata_path or not Path(tessdata_path).exists():
+                        # Default Windows path
+                        default_path = r"C:\Program Files\Tesseract-OCR\tessdata"
+                        tessdata_path = default_path
+                        LOGGER.warning("Windows tessdata not found, defaulting to %s (may not exist)", tessdata_path)
                 else:
-                    # Default to versioned path (Tesseract 5.x standard)
-                    tessdata_path = versioned_path
-                    LOGGER.warning("System tessdata not found, defaulting to %s (may not exist)", tessdata_path)
+                    # Unix-like paths (Linux/macOS)
+                    versioned_path = "/usr/share/tesseract-ocr/5/tessdata"
+                    non_versioned_path = "/usr/share/tesseract-ocr/tessdata"
+                    if Path(versioned_path).exists():
+                        tessdata_path = versioned_path
+                        LOGGER.info("Using system tessdata at %s", tessdata_path)
+                    elif Path(non_versioned_path).exists():
+                        tessdata_path = non_versioned_path
+                        LOGGER.info("Using system tessdata at %s", tessdata_path)
+                    else:
+                        # Default to versioned path (Tesseract 5.x standard)
+                        tessdata_path = versioned_path
+                        LOGGER.warning("System tessdata not found, defaulting to %s (may not exist)", tessdata_path)
         
         # Verify language files exist before setting TESSDATA_PREFIX
         tessdata_dir = Path(tessdata_path)
@@ -137,16 +203,36 @@ class TesseractRunner:
         if tesseract_path:
             return tesseract_path
         
-        # Common installation paths (especially for Heroku/apt buildpack)
-        common_paths = [
-            "/usr/bin/tesseract",
-            "/usr/local/bin/tesseract",
-            "/opt/homebrew/bin/tesseract",  # macOS Apple Silicon
-            "/usr/local/opt/tesseract/bin/tesseract",  # macOS Homebrew
-        ]
+        # Common installation paths
+        import platform
+        is_windows = platform.system() == "Windows"
+        
+        if is_windows:
+            # Windows common paths
+            common_paths = [
+                r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+                r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+                r"C:\Tesseract-OCR\tesseract.exe",
+                os.path.expanduser(r"~\AppData\Local\Programs\Tesseract-OCR\tesseract.exe"),
+            ]
+            # Also check common installation directories
+            program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+            program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+            common_paths.extend([
+                os.path.join(program_files, "Tesseract-OCR", "tesseract.exe"),
+                os.path.join(program_files_x86, "Tesseract-OCR", "tesseract.exe"),
+            ])
+        else:
+            # Unix-like paths (Linux/macOS)
+            common_paths = [
+                "/usr/bin/tesseract",
+                "/usr/local/bin/tesseract",
+                "/opt/homebrew/bin/tesseract",  # macOS Apple Silicon
+                "/usr/local/opt/tesseract/bin/tesseract",  # macOS Homebrew
+            ]
         
         for path in common_paths:
-            if Path(path).exists() and os.access(path, os.X_OK):
+            if Path(path).exists() and (not is_windows or os.access(path, os.R_OK)):
                 return path
         
         return None

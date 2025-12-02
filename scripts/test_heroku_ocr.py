@@ -26,8 +26,11 @@ from services.ocr_worker.preprocess import preprocess_image, UnreadableImageErro
 from services.ocr_worker.tesseract_runner import TesseractRunner, TesseractRuntimeError
 from services.ocr_worker.postprocess import build_structured_payload
 from libs.common.config import AppSettings
+from libs.common.darnitsa import has_darnitsa_prefix
 from libs.data.repositories import CatalogRepository
 from libs.data import async_session_factory
+import platform
+import shutil
 
 
 def print_section(title: str, char: str = "="):
@@ -57,6 +60,41 @@ def print_dict(data: dict, indent: int = 0):
 
 async def main():
     """Основная функция тестирования OCR."""
+    # Проверка наличия Tesseract перед началом работы
+    print_section("Проверка зависимостей")
+    tesseract_found = shutil.which("tesseract") is not None
+    if not tesseract_found:
+        # Проверяем стандартные пути установки
+        is_windows = platform.system() == "Windows"
+        if is_windows:
+            common_paths = [
+                r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+                r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+            ]
+            for path in common_paths:
+                if os.path.exists(path):
+                    tesseract_found = True
+                    break
+        
+        if not tesseract_found:
+            print("❌ Tesseract OCR не найден!")
+            print("\n📥 Инструкции по установке:")
+            if is_windows:
+                print("   1. Скачайте Tesseract для Windows:")
+                print("      https://github.com/UB-Mannheim/tesseract/wiki")
+                print("   2. Установите в стандартную директорию:")
+                print("      C:\\Program Files\\Tesseract-OCR\\")
+                print("   3. Добавьте в PATH или укажите путь через переменную окружения:")
+                print("      TESSERACT_CMD=C:\\Program Files\\Tesseract-OCR\\tesseract.exe")
+            else:
+                print("   Установите через пакетный менеджер:")
+                print("   - Ubuntu/Debian: sudo apt-get install tesseract-ocr")
+                print("   - macOS: brew install tesseract")
+                print("   - Или укажите путь через переменную окружения TESSERACT_CMD")
+            return 1
+    
+    print("✅ Tesseract найден")
+    
     # Инициализация настроек
     os.environ.setdefault("TELEGRAM_BOT_TOKEN", "dummy")
     os.environ.setdefault("ENCRYPTION_SECRET", "dummy_secret")
@@ -194,6 +232,7 @@ async def main():
         confidence = item.get('confidence', 0)
         sku_code = item.get('sku_code')
         sku_score = item.get('sku_match_score', 0)
+        is_darnitsa = item.get('is_darnitsa', False)
         
         normalized_name = item.get('name', 'неизвестно')
         original_name = original_texts.get(i-1, normalized_name)
@@ -204,6 +243,8 @@ async def main():
         print(f"     Количество: {quantity}")
         print(f"     Цена: {price_uah:.2f} грн")
         print(f"     Уверенность: {confidence:.2%}")
+        if is_darnitsa:
+            print(f"     ✅ Префикс 'Дарниця': ДА")
         if sku_code:
             print(f"     SKU: {sku_code} (совпадение: {sku_score:.2%})")
     
@@ -225,45 +266,49 @@ async def main():
     
     print(f"\n🔍 ТРЕБУЕТСЯ РУЧНАЯ ПРОВЕРКА: {structured_payload.get('manual_review_required', False)}")
     
-    # Проверка наличия слова "Дарниця"
-    print_section("ПРОВЕРКА НАЛИЧИЯ ПРЕПАРАТОВ 'Дарниця'")
-    # Учитываем различные варианты написания и транслитерацию через unidecode
-    search_terms_cyrillic = ["дарниця", "дарница", "дарниці", "дарницю", "дарницею"]
-    search_terms_latin = ["darnitsa", "darnitsia", "kaptopres-darnitsia", "kaptopres-darnitsa"]
+    # Проверка наличия препаратов с префиксом "Дарниця"
+    print_section("ПРОВЕРКА НАЛИЧИЯ ПРЕПАРАТОВ 'Дарниця' (ПРЕФИКС)")
     
     found_items = []
-    # Проверяем оригинальные тексты (до нормализации) для поиска кириллицы
-    if 'line_clusters_original' in locals():
-        for i, cluster in enumerate(line_clusters_original):
-            original_text_lower = cluster.text.lower()
-            # Ищем кириллические варианты в оригинальном тексте
-            if any(term in original_text_lower for term in search_terms_cyrillic):
-                if i < len(line_items):
-                    found_items.append((i, line_items[i], cluster.text))
-    
-    # Также проверяем нормализованные имена товаров (для транслитерации)
+    # Проверяем все товары используя новую функцию has_darnitsa_prefix
     for i, item in enumerate(line_items):
-        name_lower = item.get('name', '').lower()
-        if any(term in name_lower for term in search_terms_latin):
-            # Проверяем, не добавлен ли уже этот товар
-            if not any(idx == i for idx, _, _ in found_items):
-                original_text = original_texts.get(i, item.get('name', ''))
-                found_items.append((i, item, original_text))
+        original_name = item.get('original_name') or item.get('name', '')
+        normalized_name = item.get('name', '')
+        is_darnitsa = item.get('is_darnitsa', False)
+        
+        # Проверяем через функцию has_darnitsa_prefix
+        has_prefix = has_darnitsa_prefix(original_name) or has_darnitsa_prefix(normalized_name)
+        
+        if has_prefix or is_darnitsa:
+            original_text = original_texts.get(i, original_name)
+            found_items.append((i, item, original_text, has_prefix, is_darnitsa))
     
     if found_items:
-        print(f"✅ Найдено {len(found_items)} препаратов 'Дарниця':")
-        for idx, item, original_text in found_items:
+        print(f"✅ Найдено {len(found_items)} препаратов с префиксом 'Дарниця':")
+        for idx, item, original_text, has_prefix, is_darnitsa in found_items:
             price_uah = item.get('price', 0) / 100 if item.get('price') else 0
             normalized_name = item.get('name', 'неизвестно')
-            print(f"  {idx+1}. {normalized_name}")
+            quantity = item.get('quantity', 1)
+            
+            print(f"\n  {idx+1}. {normalized_name}")
             if original_text != normalized_name:
                 print(f"      (оригинал: {original_text})")
+            print(f"      Количество: {quantity} шт.")
             print(f"      Цена: {price_uah:.2f} грн")
+            print(f"      Префикс найден: ✅ (has_prefix={has_prefix}, is_darnitsa={is_darnitsa})")
+            
+            # Дополнительная проверка: убеждаемся, что префикс действительно в начале
+            if not has_prefix:
+                print(f"      ⚠️  ВНИМАНИЕ: is_darnitsa=True, но has_darnitsa_prefix вернул False!")
     else:
-        print("❌ Препараты 'Дарниця' не найдены")
-        print("   Проверенные варианты:")
-        print(f"   - Кириллица: {', '.join(search_terms_cyrillic)}")
-        print(f"   - Транслитерация: {', '.join(search_terms_latin)}")
+        print("❌ Препараты с префиксом 'Дарниця' не найдены")
+        print("\n   Проверенные товары:")
+        for i, item in enumerate(line_items[:10]):  # Показываем первые 10
+            original_name = item.get('original_name') or item.get('name', '')
+            normalized_name = item.get('name', '')
+            has_prefix_orig = has_darnitsa_prefix(original_name)
+            has_prefix_norm = has_darnitsa_prefix(normalized_name)
+            print(f"   {i+1}. '{normalized_name[:50]}' -> префикс: {has_prefix_orig or has_prefix_norm}")
     
     # Сохранение полного результата в JSON
     output_file = project_root / "scripts" / "ocr_result.json"
@@ -283,5 +328,15 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
-    sys.exit(asyncio.run(main()))
+    try:
+        exit_code = asyncio.run(main())
+        sys.exit(exit_code)
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Прервано пользователем")
+        sys.exit(130)
+    except Exception as e:
+        print(f"\n\n❌ Критическая ошибка: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
