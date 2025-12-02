@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 from io import BytesIO
 
+import imageio.v3 as iio
 import numpy as np
-from PIL import Image
 from qreader import QReader
 
 LOGGER = logging.getLogger(__name__)
@@ -81,12 +81,18 @@ def _decode_image(image_bytes: bytes) -> np.ndarray | None:
         numpy array in RGB format, or None if decoding fails
     """
     try:
-        pil_image = Image.open(BytesIO(image_bytes))
-        if pil_image.mode != "RGB":
-            pil_image = pil_image.convert("RGB")
+        # Use imageio to decode image bytes directly to numpy array
+        # imageio will use available plugins (preferring non-pillow if available)
+        image_rgb = iio.imread(BytesIO(image_bytes))
         
-        # Convert PIL Image to numpy array
-        image_rgb = np.array(pil_image)
+        # Ensure RGB format (imageio returns RGB by default)
+        if len(image_rgb.shape) == 3 and image_rgb.shape[2] == 4:
+            # RGBA to RGB conversion
+            image_rgb = image_rgb[:, :, :3]
+        elif len(image_rgb.shape) == 2:
+            # Grayscale to RGB conversion
+            image_rgb = np.stack([image_rgb] * 3, axis=-1)
+        
         return image_rgb
         
     except Exception as e:
