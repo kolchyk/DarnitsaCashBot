@@ -264,7 +264,7 @@ async def upload_receipt(
     async def process_receipt():
         try:
             logger.info(f"Starting QR code processing for receipt {receipt.id}, storage_key={object_key}")
-            from services.ocr_worker.worker import process_message
+            from apps.api_gateway.services.ocr.worker import process_message
             await process_message({
                 "receipt_id": str(receipt.id),
                 "storage_key": object_key,
@@ -422,7 +422,7 @@ async def submit_manual_receipt_data(
     # Trigger rules engine evaluation
     async def process_manual_receipt():
         try:
-            from services.rules_engine.service import evaluate
+            from apps.api_gateway.services.rules.service import evaluate
             await evaluate({
                 "receipt_id": str(receipt_id),
                 "ocr_payload": ocr_payload,

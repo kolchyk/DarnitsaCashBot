@@ -20,7 +20,6 @@ class RateLimiter:
         limit: int,
         ttl_seconds: int,
         settings: AppSettings | None = None,
-        redis_client: object | None = None,  # kept for backwards compatibility
     ):
         self.prefix = prefix
         self.limit = limit
@@ -28,13 +27,11 @@ class RateLimiter:
         self.settings = settings or get_settings()
         self._hits: dict[str, list[float]] = defaultdict(list)
         self._lock = asyncio.Lock()
-        if redis_client is not None:
-            logger.debug("redis_client argument ignored; in-memory limiter is used.")
 
     async def check(self, key: str) -> bool:
         async with self._lock:
             now = time.monotonic()
-            bucket = self._hits[self._redis_key(key)]
+            bucket = self._hits[self._key(key)]
             bucket[:] = [ts for ts in bucket if now - ts < self.ttl_seconds]
             if len(bucket) >= self.limit:
                 return False
@@ -44,10 +41,11 @@ class RateLimiter:
     async def tokens_left(self, key: str) -> int:
         async with self._lock:
             now = time.monotonic()
-            bucket = self._hits[self._redis_key(key)]
+            bucket = self._hits[self._key(key)]
             bucket[:] = [ts for ts in bucket if now - ts < self.ttl_seconds]
             return max(self.limit - len(bucket), 0)
 
-    def _redis_key(self, key: str) -> str:
+    def _key(self, key: str) -> str:
+        """Generate a namespaced key for rate limiting."""
         return f"{self.prefix}:{key}"
 

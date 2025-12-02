@@ -30,7 +30,7 @@ class AppSettings(BaseSettings):
     
     @model_validator(mode="after")
     def parse_heroku_urls(self):
-        """Parse Heroku DATABASE_URL and REDIS_URL if provided."""
+        """Parse Heroku DATABASE_URL if provided."""
         # Parse DATABASE_URL
         db_url = os.getenv("DATABASE_URL")
         if db_url:
@@ -41,33 +41,10 @@ class AppSettings(BaseSettings):
             self.postgres_port = parsed.port or self.postgres_port
             self.postgres_db = parsed.path.lstrip("/") if parsed.path else self.postgres_db
         
-        # Parse REDIS_URL
-        redis_url = os.getenv("REDIS_URL")
-        if redis_url:
-            parsed = urlparse(redis_url)
-            self.redis_host = parsed.hostname or self.redis_host
-            self.redis_port = parsed.port or self.redis_port
-            self.redis_password = parsed.password or self.redis_password
-        
         return self
 
-    storage_endpoint: str | None = Field(default=None, alias="STORAGE_ENDPOINT")
-    storage_bucket: str = Field(default="receipts", alias="STORAGE_BUCKET")
-    storage_access_key: str = Field(default="miniokey", alias="STORAGE_ACCESS_KEY")
-    storage_secret_key: str = Field(default="miniopass", alias="STORAGE_SECRET_KEY")
-    storage_region: str = Field(default="us-east-1", alias="STORAGE_REGION")
+    # Local file storage configuration (no MinIO/S3 needed for MVP)
     storage_base_dir: str = Field(default="storage", alias="STORAGE_BASE_DIR")
-
-    redis_host: str = Field(default="localhost", alias="REDIS_HOST")
-    redis_port: int = Field(default=6379, alias="REDIS_PORT")
-    redis_password: str | None = Field(default=None, alias="REDIS_PASSWORD")
-    
-    @property
-    def redis_url(self) -> str:
-        """Get Redis URL from components."""
-        if self.redis_password:
-            return f"redis://:{self.redis_password}@{self.redis_host}:{self.redis_port}"
-        return f"redis://{self.redis_host}:{self.redis_port}"
 
     easypay_api_base: str = Field(default="http://localhost:8080", alias="EASYPAY_API_BASE")
     easypay_merchant_id: str = Field(default="merchant", alias="EASYPAY_MERCHANT_ID")
