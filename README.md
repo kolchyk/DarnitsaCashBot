@@ -113,55 +113,10 @@ OCR запускається безпосередньо з ендпоінта `/
 heroku create your-app-name
 heroku addons:create heroku-postgresql:mini
 
-# Налаштування buildpack для встановлення системних залежностей (Tesseract OCR)
-# Файл .buildpacks вже містить необхідні buildpack, але якщо потрібно налаштувати вручну:
-heroku buildpacks:set https://github.com/heroku/heroku-buildpack-apt.git --index 1
-heroku buildpacks:set heroku/python --index 2
-
 heroku config:set TELEGRAM_BOT_TOKEN=your_token ENCRYPTION_SECRET=your_secret
 git push heroku main
 heroku run alembic upgrade head
 heroku ps:scale web=1
-```
-
-**Важливо**: Проект використовує `Aptfile` для встановлення Tesseract OCR та інших системних залежностей. Файл `.buildpacks` автоматично налаштовує необхідний buildpack. Якщо після деплою виникає помилка `TesseractNotFoundError`, переконайтеся, що buildpack встановлено правильно:
-
-```bash
-heroku buildpacks --app your-app-name
-```
-
-Має бути:
-
-1. `heroku-buildpack-apt` (для встановлення пакетів з Aptfile)
-2. `heroku/python` (для Python залежностей)
-
-### Налаштування Tesseract на Heroku
-
-Код автоматично налаштовує Tesseract для Heroku:
-- Автоматично знаходить tesseract у стандартних місцях встановлення (`/usr/bin/tesseract`, `/usr/local/bin/tesseract`)
-- Автоматично встановлює `TESSDATA_PREFIX=/usr/share/tesseract-ocr/tessdata` (стандартне розташування для Ubuntu/Heroku)
-
-Для явного вказання шляхів (опціонально), встановіть змінні середовища:
-
-```bash
-heroku config:set TESSERACT_CMD=/usr/bin/tesseract
-heroku config:set TESSDATA_DIR=/usr/share/tesseract-ocr/tessdata
-```
-
-**Перевірка встановлення tesseract після деплою:**
-
-```bash
-# Перевірка версії tesseract
-heroku run tesseract --version
-
-# Перевірка доступних мовних пакетів
-heroku run ls /usr/share/tesseract-ocr/tessdata
-
-# Перевірка через Python/pytesseract
-heroku run python -c "import pytesseract; print(pytesseract.get_tesseract_version())"
-
-# Перевірка змінної середовища TESSDATA_PREFIX
-heroku run python -c "import os; print('TESSDATA_PREFIX:', os.environ.get('TESSDATA_PREFIX', 'NOT SET'))"
 ```
 
 ## Доступні сервіси
