@@ -80,6 +80,27 @@ class TesseractRunner:
                 LOGGER.error(error_msg)
                 raise TesseractRuntimeError(error_msg)
         
+        # Verify that Tesseract actually works by trying to get its version
+        try:
+            self._verify_tesseract()
+        except Exception as e:
+            import platform
+            is_windows = platform.system() == "Windows"
+            tesseract_cmd = pytesseract.pytesseract.tesseract_cmd
+            if is_windows:
+                error_msg = (
+                    f"Tesseract OCR found at '{tesseract_cmd}' but cannot be executed. "
+                    f"Please verify the installation or set TESSERACT_CMD environment variable. "
+                    f"Common installation paths: C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+                )
+            else:
+                error_msg = (
+                    f"Tesseract OCR found at '{tesseract_cmd}' but cannot be executed. "
+                    f"Please verify the installation or set TESSERACT_CMD environment variable."
+                )
+            LOGGER.error("%s. Original error: %s", error_msg, str(e))
+            raise TesseractRuntimeError(error_msg) from e
+        
         # Set TESSDATA_PREFIX - use configured value or auto-detect
         # Priority: 1) configured TESSDATA_DIR, 2) app tessdata_final (Heroku), 3) system paths
         tessdata_path = settings.tessdata_dir
@@ -195,6 +216,18 @@ class TesseractRunner:
             "totals": TesseractProfile(name="totals", psm=7, whitelist="0123456789₴грн., "),
         }
 
+    @staticmethod
+    def _verify_tesseract() -> None:
+        """Verify that Tesseract can be executed by checking its version."""
+        try:
+            # This will raise TesseractNotFoundError if tesseract can't be found/executed
+            pytesseract.pytesseract.get_tesseract_version()
+        except pytesseract.TesseractNotFoundError:
+            raise
+        except Exception as e:
+            # Re-raise any other exception as-is
+            raise
+    
     @staticmethod
     def _find_tesseract() -> str | None:
         """Find tesseract binary in common installation locations."""

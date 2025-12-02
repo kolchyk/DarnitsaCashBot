@@ -63,6 +63,8 @@ async def main():
     # Проверка наличия Tesseract перед началом работы
     print_section("Проверка зависимостей")
     tesseract_found = shutil.which("tesseract") is not None
+    tesseract_path = None
+    
     if not tesseract_found:
         # Проверяем стандартные пути установки
         is_windows = platform.system() == "Windows"
@@ -74,6 +76,7 @@ async def main():
             for path in common_paths:
                 if os.path.exists(path):
                     tesseract_found = True
+                    tesseract_path = path
                     break
         
         if not tesseract_found:
@@ -93,7 +96,17 @@ async def main():
                 print("   - Или укажите путь через переменную окружения TESSERACT_CMD")
             return 1
     
-    print("✅ Tesseract найден")
+    # Если нашли Tesseract в стандартном пути, устанавливаем переменную окружения
+    if tesseract_path:
+        os.environ["TESSERACT_CMD"] = tesseract_path
+        print(f"✅ Tesseract найден: {tesseract_path}")
+        print(f"   Установлена переменная окружения TESSERACT_CMD")
+    else:
+        tesseract_path = shutil.which("tesseract")
+        if tesseract_path:
+            print(f"✅ Tesseract найден в PATH: {tesseract_path}")
+        else:
+            print("✅ Tesseract найден (путь будет определен автоматически)")
     
     # Инициализация настроек
     os.environ.setdefault("TELEGRAM_BOT_TOKEN", "dummy")
