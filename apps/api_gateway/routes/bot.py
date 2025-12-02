@@ -29,6 +29,7 @@ from ..dependencies import (
 )
 from ..exceptions import UserAlreadyExistsError
 from ..schemas import (
+    ReceiptLineItem,
     DarnitsaProduct,
     ManualReceiptDataRequest,
     ReceiptHistoryItem,
@@ -259,23 +260,23 @@ async def upload_receipt(
     }
     await analytics.record("receipt_uploaded", payload)
     
-    # Trigger OCR processing in background
-    async def process_ocr():
+    # Trigger QR code processing in background
+    async def process_receipt():
         try:
-            logger.info(f"Starting OCR processing for receipt {receipt.id}, storage_key={object_key}")
+            logger.info(f"Starting QR code processing for receipt {receipt.id}, storage_key={object_key}")
             from services.ocr_worker.worker import process_message
             await process_message({
                 "receipt_id": str(receipt.id),
                 "storage_key": object_key,
             })
-            logger.info(f"OCR processing completed for receipt {receipt.id}")
+            logger.info(f"QR code processing completed for receipt {receipt.id}")
         except Exception as e:
             logger.error(
-                f"Failed to process OCR for receipt {receipt.id}: {type(e).__name__}: {str(e)}",
+                f"Failed to process receipt {receipt.id}: {type(e).__name__}: {str(e)}",
                 exc_info=True,
             )
     
-    background_tasks.add_task(process_ocr)
+    background_tasks.add_task(process_receipt)
     
     return ReceiptUploadResponse(
         receipt=ReceiptResponse(receipt_id=receipt.id, status=receipt.status),
@@ -299,21 +300,45 @@ async def get_receipt_status(
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
     
-    # Check if OCR failed by looking at ocr_payload
+    # Check if QR code processing failed by looking at ocr_payload
     ocr_payload = receipt.ocr_payload
     if ocr_payload and isinstance(ocr_payload, dict):
-        # If ocr_payload has error field, it means OCR failed
-        if ocr_payload.get("error") or ocr_payload.get("type") in ("unreadable_image", "tesseract_failure"):
+        # If ocr_payload has error field, it means QR code processing failed
+        error_type = ocr_payload.get("type")
+        if ocr_payload.get("error") or error_type in (
+            "unreadable_image",
+            "tesseract_failure",
+            "qr_code_not_found",
+            "scraping_failed",
+            "parsing_failed",
+            "processing_error",
+        ):
             await session.commit()
             return ReceiptResponse(receipt_id=receipt.id, status="rejected")
     
     # Filter Darnitsa products from preloaded line items
     darnitsa_products: list[DarnitsaProduct] = []
+    all_line_items: list[ReceiptLineItem] = []
+    
     if receipt.status in ("processing", "accepted"):
         darnitsa_products = _filter_darnitsa_products(
             receipt.line_items,
             receipt.ocr_payload,
         )
+        
+        # Extract all line items from ocr_payload
+        if ocr_payload and isinstance(ocr_payload, dict):
+            ocr_line_items = ocr_payload.get("line_items", [])
+            for item in ocr_line_items:
+                price_kopecks = item.get("price")
+                price_uah = float(price_kopecks) / 100.0 if price_kopecks else 0.0
+                all_line_items.append(
+                    ReceiptLineItem(
+                        name=item.get("name", ""),
+                        quantity=item.get("quantity", 1),
+                        price=price_uah,
+                    )
+                )
     
     # Commit read-only transaction to avoid ROLLBACK log noise
     await session.commit()
@@ -322,6 +347,7 @@ async def get_receipt_status(
         receipt_id=receipt.id,
         status=receipt.status,
         darnitsa_products=darnitsa_products if darnitsa_products else None,
+        line_items=all_line_items if all_line_items else None,
     )
 
 

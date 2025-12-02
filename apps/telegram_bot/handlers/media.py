@@ -41,9 +41,9 @@ async def handle_receipt_photo(message: Message, receipt_client: ReceiptApiClien
             f"Чек отримано. Виплата PortmoneDirect почнеться після підтвердження. Поточний статус: {status_translated}"
         )
         
-        # Check OCR status after a delay
+        # Check receipt processing status after a delay
         bot = message.bot
-        asyncio.create_task(check_ocr_status(message.from_user.id, receipt_id, receipt_client, bot))
+        asyncio.create_task(check_receipt_status(message.from_user.id, receipt_id, receipt_client, bot))
     except TimeoutError as e:
         await message.answer(
             "⏱️ Час очікування вичерпано при завантаженні чека. "
@@ -61,9 +61,9 @@ async def handle_receipt_photo(message: Message, receipt_client: ReceiptApiClien
         )
 
 
-async def check_ocr_status(telegram_id: int, receipt_id: str, receipt_client: ReceiptApiClient, bot: Bot):
-    """Check OCR status after processing and send appropriate message."""
-    await asyncio.sleep(8)  # Wait for OCR to process
+async def check_receipt_status(telegram_id: int, receipt_id: str, receipt_client: ReceiptApiClient, bot: Bot):
+    """Check receipt processing status after QR code scanning and send appropriate message."""
+    await asyncio.sleep(8)  # Wait for QR code processing
     
     try:
         status_response = await receipt_client.get_receipt_status(receipt_id=receipt_id)
@@ -75,49 +75,46 @@ async def check_ocr_status(telegram_id: int, receipt_id: str, receipt_client: Re
             status_response = await receipt_client.get_receipt_status(receipt_id=receipt_id)
             status = status_response.get("status")
         
-        # If OCR succeeded (processing or accepted), send success message
+        # If QR code processing succeeded (processing or accepted), send receipt items
         if status in ("processing", "accepted"):
-            darnitsa_products = status_response.get("darnitsa_products")
+            line_items = status_response.get("line_items", [])
+            darnitsa_products = status_response.get("darnitsa_products", [])
             
-            if darnitsa_products and len(darnitsa_products) > 0:
-                # Build detailed message about found Darnitsa products
-                def _fmt(amount: float) -> str:
-                    return f"{amount:.2f}"
-
-                message_parts = ["✅ Розпізнавання успішне!\n\n"]
-                message_parts.append("🎉 Знайдено препарат(и) Дарниця з потрібним префіксом:\n\n")
+            # Build simple text message with all receipt items
+            if line_items:
+                message_parts = ["✅ Чек успішно розпізнано!\n\n"]
+                message_parts.append("📋 Позиції в чеку:\n\n")
                 
-                total_price = 0
-                for idx, product in enumerate(darnitsa_products, start=1):
-                    product_name = product.get("name", "Невідомий препарат")
-                    price = float(product.get("price", 0) or 0)
-                    quantity = product.get("quantity", 1)
-                    total_price += price * quantity
+                for idx, item in enumerate(line_items, start=1):
+                    name = item.get("name", "Невідомий товар")
+                    quantity = item.get("quantity", 1)
+                    price = float(item.get("price", 0) or 0)
                     
-                    message_parts.append(f"{idx}. 📦 {product_name}\n")
                     if quantity > 1:
+                        message_parts.append(f"{idx}. {name}\n")
                         message_parts.append(f"   Кількість: {quantity} шт.\n")
-                        message_parts.append(f"   Ціна за одиницю: {_fmt(price)} грн\n")
-                    message_parts.append(f"   💰 Сума: {_fmt(price * quantity)} грн\n\n")
+                        message_parts.append(f"   Ціна: {price:.2f} грн\n\n")
+                    else:
+                        message_parts.append(f"{idx}. {name} - {price:.2f} грн\n\n")
                 
-                if len(darnitsa_products) > 1:
-                    message_parts.append(f"💵 Загальна сума: {_fmt(total_price)} грн\n\n")
-                
-                message_parts.append("✅ Бонус буде нараховано!\n\n")
-                message_parts.append("💳 Вам буде зараховано 1 грн на мобільний телефон протягом години після підтвердження чека.\n")
-                message_parts.append("Бонус надійде на номер телефону, який ви вказали в профілі.\n\n")
-                message_parts.append("Дякуємо за вибір продукції Дарниця! 🙏")
+                # Add Darnitsa products info if found
+                if darnitsa_products and len(darnitsa_products) > 0:
+                    message_parts.append("\n🎉 Знайдено препарат(и) Дарниця!\n")
+                    message_parts.append("✅ Бонус буде нараховано!\n")
+                    message_parts.append("💳 Вам буде зараховано 1 грн на мобільний телефон протягом години після підтвердження чека.\n")
+                else:
+                    message_parts.append("\nℹ️ У вашому чеку не знайдено препаратів Дарниця.\n")
+                    message_parts.append("Бонус нараховується тільки за покупку продукції Дарниця.\n")
                 
                 await bot.send_message(telegram_id, "".join(message_parts))
             else:
-                # No Darnitsa products found - inform user
+                # No items found
                 await bot.send_message(
                     telegram_id,
                     "✅ Чек успішно розпізнано!\n\n"
-                    "ℹ️ У вашому чеку не знайдено препаратів Дарниця.\n"
-                    "Бонус нараховується тільки за покупку продукції Дарниця."
+                    "ℹ️ Не вдалося отримати список позицій з чека."
                 )
-        # If OCR failed (rejected), offer manual input
+        # If QR code processing failed (rejected), offer manual input
         elif status == "rejected":
             _pending_receipts[telegram_id] = receipt_id
             await bot.send_message(
@@ -209,5 +206,5 @@ async def fallback_handler(message: Message, receipt_client: ReceiptApiClient):
             )
         return
     
-    await message.answer("Надішліть фото чека або скористайтеся /help для інструкцій.")
+    await message.answer("Надішліть фото чека з QR кодом або скористайтеся /help для інструкцій.")
 

@@ -26,10 +26,17 @@ class DarnitsaProduct(BaseModel):
     quantity: int
 
 
+class ReceiptLineItem(BaseModel):
+    name: str
+    quantity: int
+    price: float  # Price in UAH (converted from kopecks)
+
+
 class ReceiptResponse(BaseModel):
     receipt_id: UUID
     status: str
     darnitsa_products: list[DarnitsaProduct] | None = None
+    line_items: list[ReceiptLineItem] | None = None  # All items from receipt
 
 
 class ReceiptHistoryItem(BaseModel):
