@@ -113,11 +113,17 @@ OCR запускається безпосередньо з ендпоінта `/
 heroku create your-app-name
 heroku addons:create heroku-postgresql:mini
 
+# Встановлення buildpack для системних залежностей (zbar для pyzbar)
+# Якщо використовується .buildpacks файл, це не потрібно
+heroku buildpacks:add --index 1 https://github.com/heroku/heroku-buildpack-apt.git
+
 heroku config:set TELEGRAM_BOT_TOKEN=your_token ENCRYPTION_SECRET=your_secret
 git push heroku main
 heroku run alembic upgrade head
 heroku ps:scale web=1
 ```
+
+**Примітка:** Проект використовує `pyzbar` для розпізнавання QR-кодів, що вимагає системну бібліотеку `libzbar0`. Вона встановлюється автоматично через `Aptfile` та `heroku-buildpack-apt`.
 
 ## Доступні сервіси
 

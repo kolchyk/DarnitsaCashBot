@@ -3,9 +3,8 @@ from __future__ import annotations
 import logging
 from io import BytesIO
 
-import imageio.v3 as iio
-import numpy as np
-from qreader import QReader
+from PIL import Image
+from pyzbar import pyzbar
 
 LOGGER = logging.getLogger(__name__)
 
@@ -16,8 +15,7 @@ class QRCodeNotFoundError(Exception):
 
 def detect_qr_code(image_bytes: bytes) -> str | None:
     """
-    Detect QR code in image using QReader (YOLOv8 + Pyzbar).
-    QReader is the most robust solution for detecting QR codes in challenging or low-quality images.
+    Detect QR code in image using pyzbar.
     
     Args:
         image_bytes: Raw image bytes
@@ -31,34 +29,32 @@ def detect_qr_code(image_bytes: bytes) -> str | None:
     LOGGER.debug("Starting QR code detection: image_size=%d bytes", len(image_bytes))
     
     try:
-        # Decode image to numpy array (RGB format for QReader)
+        # Decode image to PIL Image
         image = _decode_image(image_bytes)
         if image is None:
             raise QRCodeNotFoundError("Failed to decode image")
         
-        LOGGER.debug("Image decoded: shape=%s", image.shape)
+        LOGGER.debug("Image decoded: size=%s, mode=%s", image.size, image.mode)
         
-        # Use QReader for detection
-        qreader = QReader()
-        decoded_text = qreader.detect_and_decode(image)
+        # Use pyzbar for detection
+        decoded_objects = pyzbar.decode(image)
         
-        if decoded_text:
-            # QReader might return a string, tuple, or a list
-            if isinstance(decoded_text, tuple):
-                # Extract first element from tuple if it's not empty
-                decoded_text = decoded_text[0] if decoded_text else None
-            
-            if isinstance(decoded_text, list):
-                # If multiple QR codes found, return the first valid one
-                for text in decoded_text:
-                    if text:
-                        LOGGER.info("QR code detected with QReader: data_length=%d, data_preview=%s", len(text), text[:50])
-                        return str(text)
-            elif decoded_text:
-                # Single string result
-                result_str = str(decoded_text)
-                LOGGER.info("QR code detected with QReader: data_length=%d, data_preview=%s", len(result_str), result_str[:50])
-                return result_str
+        if decoded_objects:
+            # Process all found QR codes, return the first valid one
+            for decoded in decoded_objects:
+                if decoded.type == 'QRCODE':
+                    try:
+                        # Decode bytes to string
+                        qr_data = decoded.data.decode('utf-8')
+                        LOGGER.info(
+                            "QR code detected with pyzbar: data_length=%d, data_preview=%s",
+                            len(qr_data),
+                            qr_data[:50],
+                        )
+                        return qr_data
+                    except UnicodeDecodeError as e:
+                        LOGGER.warning("Failed to decode QR code data as UTF-8: %s", e)
+                        continue
         
         LOGGER.warning("No QR codes found in image")
         return None
@@ -70,30 +66,26 @@ def detect_qr_code(image_bytes: bytes) -> str | None:
         raise QRCodeNotFoundError(f"Failed to detect QR code: {str(e)}") from e
 
 
-def _decode_image(image_bytes: bytes) -> np.ndarray | None:
+def _decode_image(image_bytes: bytes) -> Image.Image | None:
     """
-    Decode image bytes to numpy array in RGB format (required by QReader).
+    Decode image bytes to PIL Image.
     
     Args:
         image_bytes: Raw image bytes
         
     Returns:
-        numpy array in RGB format, or None if decoding fails
+        PIL Image object, or None if decoding fails
     """
     try:
-        # Use imageio to decode image bytes directly to numpy array
-        # imageio will use available plugins (preferring non-pillow if available)
-        image_rgb = iio.imread(BytesIO(image_bytes))
+        # Load image from bytes using PIL
+        image = Image.open(BytesIO(image_bytes))
         
-        # Ensure RGB format (imageio returns RGB by default)
-        if len(image_rgb.shape) == 3 and image_rgb.shape[2] == 4:
-            # RGBA to RGB conversion
-            image_rgb = image_rgb[:, :, :3]
-        elif len(image_rgb.shape) == 2:
-            # Grayscale to RGB conversion
-            image_rgb = np.stack([image_rgb] * 3, axis=-1)
+        # Convert to grayscale for better QR code recognition
+        # pyzbar works better with grayscale images
+        if image.mode != 'L':
+            image = image.convert('L')
         
-        return image_rgb
+        return image
         
     except Exception as e:
         LOGGER.error("Failed to decode image: %s", e)
