@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import unicodedata
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -13,13 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from uuid import UUID
 
+from libs.common import has_darnitsa_prefix
 from libs.common.analytics import AnalyticsClient
-from libs.common.constants import (
-    DARNITSA_KEYWORDS_CYRILLIC,
-    DARNITSA_KEYWORDS_LATIN,
-    MAX_FILE_SIZE,
-    SUPPORTED_CONTENT_TYPES,
-)
+from libs.common.constants import MAX_FILE_SIZE, SUPPORTED_CONTENT_TYPES
 from libs.common.rate_limit import RateLimiter
 from libs.common.storage import StorageClient
 from libs.data.models import LineItem, Receipt
@@ -137,43 +132,47 @@ def _filter_darnitsa_products(
         return darnitsa_products
     
     ocr_line_items = ocr_payload.get("line_items", [])
-    ocr_name_map = {
-        item.get("name", ""): item.get("original_name", item.get("name", ""))
-        for item in ocr_line_items
-    }
-    
-    # Normalize keywords for consistent comparison (same as rules_engine)
-    cyrillic_keywords_normalized = [unicodedata.normalize("NFC", kw).lower() for kw in DARNITSA_KEYWORDS_CYRILLIC]
-    latin_keywords_normalized = [kw.lower() for kw in DARNITSA_KEYWORDS_LATIN]
+    ocr_lookup: dict[str, dict] = {}
+    for entry in ocr_line_items:
+        for key in (
+            entry.get("original_name"),
+            entry.get("name"),
+            entry.get("normalized_name"),
+        ):
+            if isinstance(key, str):
+                normalized_key = key.strip()
+                if normalized_key and normalized_key not in ocr_lookup:
+                    ocr_lookup[normalized_key] = entry
     
     for item in line_items:
-        # Normalize Unicode (NFC) before lowercasing to ensure consistent matching
-        name_normalized = unicodedata.normalize("NFC", item.product_name).lower()
-        # Check normalized name (transliteration)
-        found = any(keyword_normalized in name_normalized for keyword_normalized in latin_keywords_normalized)
-        
-        # If not found, check original name from OCR payload
-        if not found and ocr_name_map:
-            original_name = ocr_name_map.get(item.product_name, "")
-            if original_name:
-                # Normalize Unicode (NFC) before lowercasing
-                original_normalized = unicodedata.normalize("NFC", original_name).lower()
-                found = any(keyword_normalized in original_normalized for keyword_normalized in cyrillic_keywords_normalized)
-        
-        if found:
-            # Convert price from kopecks to UAH
-            price_uah = item.unit_price / 100.0
-            # Use original name if available, otherwise normalized name
-            display_name = ocr_name_map.get(item.product_name, item.product_name)
-            if not display_name or display_name == item.product_name:
-                display_name = item.product_name
-            darnitsa_products.append(
-                DarnitsaProduct(
-                    name=display_name,
-                    price=price_uah,
-                    quantity=item.quantity,
+        product_name = item.product_name.strip()
+        ocr_entry = ocr_lookup.get(product_name) or ocr_lookup.get(product_name.upper())
+        is_darnitsa = False
+        if ocr_entry:
+            is_darnitsa = bool(ocr_entry.get("is_darnitsa"))
+            if not is_darnitsa:
+                is_darnitsa = has_darnitsa_prefix(ocr_entry.get("original_name")) or has_darnitsa_prefix(
+                    ocr_entry.get("normalized_name")
                 )
+        if not is_darnitsa:
+            is_darnitsa = has_darnitsa_prefix(product_name)
+        
+        if not is_darnitsa:
+            continue
+        
+        price_uah = item.unit_price / 100.0
+        display_name = (
+            (ocr_entry.get("original_name") if ocr_entry else None)
+            or (ocr_entry.get("name") if ocr_entry else None)
+            or product_name
+        )
+        darnitsa_products.append(
+            DarnitsaProduct(
+                name=display_name,
+                price=price_uah,
+                quantity=item.quantity,
             )
+        )
     
     return darnitsa_products
 
@@ -354,11 +353,14 @@ async def submit_manual_receipt_data(
         
         line_items.append({
             "name": name,
+            "original_name": name,
+            "normalized_name": name.upper(),
             "quantity": quantity,
             "price": price_kopecks,
             "confidence": 1.0,  # Manual input has full confidence
             "sku_code": None,
             "sku_match_score": 0.0,
+            "is_darnitsa": has_darnitsa_prefix(name),
         })
     
     ocr_payload = {

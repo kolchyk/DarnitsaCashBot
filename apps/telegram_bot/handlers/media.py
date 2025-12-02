@@ -81,27 +81,27 @@ async def check_ocr_status(telegram_id: int, receipt_id: str, receipt_client: Re
             
             if darnitsa_products and len(darnitsa_products) > 0:
                 # Build detailed message about found Darnitsa products
+                def _fmt(amount: float) -> str:
+                    return f"{amount:.2f}"
+
                 message_parts = ["✅ Розпізнавання успішне!\n\n"]
-                message_parts.append("🎉 Знайдено препарат(и) Дарниця:\n\n")
+                message_parts.append("🎉 Знайдено препарат(и) Дарниця з потрібним префіксом:\n\n")
                 
                 total_price = 0
-                for product in darnitsa_products:
+                for idx, product in enumerate(darnitsa_products, start=1):
                     product_name = product.get("name", "Невідомий препарат")
-                    price = product.get("price", 0)
+                    price = float(product.get("price", 0) or 0)
                     quantity = product.get("quantity", 1)
                     total_price += price * quantity
                     
+                    message_parts.append(f"{idx}. 📦 {product_name}\n")
                     if quantity > 1:
-                        message_parts.append(f"📦 {product_name}\n")
                         message_parts.append(f"   Кількість: {quantity} шт.\n")
-                        message_parts.append(f"   Ціна за одиницю: {price:.2f} грн\n")
-                        message_parts.append(f"   💰 Сума: {price * quantity:.2f} грн\n\n")
-                    else:
-                        message_parts.append(f"📦 {product_name}\n")
-                        message_parts.append(f"   💰 Сума: {price:.2f} грн\n\n")
+                        message_parts.append(f"   Ціна за одиницю: {_fmt(price)} грн\n")
+                    message_parts.append(f"   💰 Сума: {_fmt(price * quantity)} грн\n\n")
                 
                 if len(darnitsa_products) > 1:
-                    message_parts.append(f"💵 Загальна сума: {total_price:.2f} грн\n\n")
+                    message_parts.append(f"💵 Загальна сума: {_fmt(total_price)} грн\n\n")
                 
                 message_parts.append("✅ Бонус буде нараховано!\n\n")
                 message_parts.append("💳 Вам буде зараховано 1 грн на мобільний телефон протягом години після підтвердження чека.\n")

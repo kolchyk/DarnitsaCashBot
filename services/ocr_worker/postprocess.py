@@ -13,7 +13,7 @@ from unidecode import unidecode
 
 import logging
 
-from libs.common import AppSettings
+from libs.common import AppSettings, has_darnitsa_prefix
 from libs.common.constants import DARNITSA_KEYWORDS_CYRILLIC, DARNITSA_KEYWORDS_LATIN
 
 from .tesseract_runner import OcrToken
@@ -120,11 +120,13 @@ def build_structured_payload(
             {
                 "name": item["name"],
                 "original_name": item.get("original_name", item["name"]),  # Оригинальный текст
+                "normalized_name": item.get("normalized_name"),
                 "quantity": item["quantity"],
                 "price": item["price"],
                 "confidence": item["confidence"],
                 "sku_code": item["sku_code"],
                 "sku_match_score": item["sku_match_score"],
+                "is_darnitsa": item.get("is_darnitsa", False),
             }
             for item in line_items
         ],
@@ -403,15 +405,18 @@ def _line_item_from_cluster(cluster: LineCluster, catalog_aliases: dict[str, lis
     normalized_name = _normalize_text(original_name)  # Нормализованный текст только для поиска SKU
     quantity, price = _extract_quantity_and_price(normalized_name)
     sku_code, score = _match_sku(normalized_name, catalog_aliases)
+    is_darnitsa = has_darnitsa_prefix(original_name) or has_darnitsa_prefix(normalized_name)
 
     return {
         "name": original_name,  # Используем оригинальный текст как основной
         "original_name": original_name,  # Оригинальный текст для поиска кириллицы
+        "normalized_name": normalized_name,
         "quantity": quantity,
         "price": price,
         "confidence": cluster.confidence,
         "sku_code": sku_code,
         "sku_match_score": score,
+        "is_darnitsa": is_darnitsa,
     }
 
 

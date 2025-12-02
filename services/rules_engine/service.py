@@ -3,20 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import unicodedata
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from unidecode import unidecode
-
-from libs.common import configure_logging, get_settings
+from libs.common import configure_logging, get_settings, has_darnitsa_prefix
 from libs.common.analytics import AnalyticsClient
-from libs.common.constants import (
-    DARNITSA_KEYWORDS_CYRILLIC,
-    DARNITSA_KEYWORDS_LATIN,
-    ELIGIBILITY_WINDOW_DAYS,
-    MAX_RECEIPTS_PER_DAY,
-)
+from libs.common.constants import ELIGIBILITY_WINDOW_DAYS, MAX_RECEIPTS_PER_DAY
 from libs.common.crypto import Encryptor
 from libs.common.events import EVENT_RECEIPT_ACCEPTED, Event, get_event_bus
 from libs.common.portmone import PortmoneDirectClient
@@ -27,9 +19,14 @@ from libs.data.repositories import ReceiptRepository
 LOGGER = logging.getLogger(__name__)
 
 
-def _normalize_for_matching(text: str) -> str:
-    """Normalize text for keyword matching: NFC normalization + lowercase."""
-    return unicodedata.normalize("NFC", text).lower()
+def _is_darnitsa_item(item: dict) -> bool:
+    """Return True if the OCR item contains a Darnitsa prefix."""
+    if item.get("is_darnitsa"):
+        return True
+    for field in ("original_name", "name", "normalized_name"):
+        if has_darnitsa_prefix(item.get(field)):
+            return True
+    return False
 
 
 async def evaluate(payload: dict) -> None:
@@ -67,67 +64,19 @@ async def evaluate(payload: dict) -> None:
         
         # Check that OCR successfully recognized at least one product
         has_items = len(line_items) > 0
-        
-        # Check for "Дарниця" in product names and merchant name
-        # Use case-insensitive search
-        # Include different cases and spelling variants in Ukrainian
         has_darnitsa = False
         
-        # First, check merchant name for Darnitsa keywords
-        if receipt.merchant:
-            # Normalize merchant name for matching (NFC + lowercase)
-            merchant_normalized = _normalize_for_matching(receipt.merchant)
-            # Also create transliterated version for Latin keyword matching
-            merchant_transliterated = unidecode(merchant_normalized)
-            
-            # Normalize keywords for consistent comparison
-            cyrillic_keywords_normalized = [_normalize_for_matching(kw) for kw in DARNITSA_KEYWORDS_CYRILLIC]
-            latin_keywords_normalized = [kw.lower() for kw in DARNITSA_KEYWORDS_LATIN]
-            
-            # Check for Darnitsa in merchant name (Cyrillic)
-            matched_keyword = None
-            for i, keyword_normalized in enumerate(cyrillic_keywords_normalized):
-                if keyword_normalized in merchant_normalized:
-                    matched_keyword = DARNITSA_KEYWORDS_CYRILLIC[i]
-                    has_darnitsa = True
-                    LOGGER.info("Found Darnitsa keyword (cyrillic) '%s' in merchant: '%s'", matched_keyword, receipt.merchant[:50])
-                    break
-            # Check in transliterated merchant name (Latin)
-            if not has_darnitsa:
-                for i, keyword_normalized in enumerate(latin_keywords_normalized):
-                    if keyword_normalized in merchant_transliterated:
-                        matched_keyword = DARNITSA_KEYWORDS_LATIN[i]
-                        has_darnitsa = True
-                        LOGGER.info("Found Darnitsa keyword (latin) '%s' in merchant: '%s'", matched_keyword, receipt.merchant[:50])
-                        break
-            if not has_darnitsa:
-                LOGGER.info("No Darnitsa keyword found in merchant '%s' (normalized: '%s', transliterated: '%s', checked %d cyrillic + %d latin keywords)", 
-                           receipt.merchant[:50], merchant_normalized[:50], merchant_transliterated[:50], 
-                           len(DARNITSA_KEYWORDS_CYRILLIC), len(DARNITSA_KEYWORDS_LATIN))
-                LOGGER.debug("Cyrillic keywords checked: %s", DARNITSA_KEYWORDS_CYRILLIC)
-                LOGGER.debug("Latin keywords checked: %s", DARNITSA_KEYWORDS_LATIN)
-        
-        # Save all recognized products and check for Darnitsa
         LOGGER.info(
-            "Evaluating receipt %s: line_items=%d, daily_count=%d/%d, merchant=%s, has_darnitsa_so_far=%s",
+            "Evaluating receipt %s: line_items=%d, daily_count=%d/%d, merchant=%s",
             receipt_id,
             len(line_items),
             daily_count,
             MAX_RECEIPTS_PER_DAY,
             receipt.merchant[:50] if receipt.merchant else "None",
-            has_darnitsa,
         )
         
-        # Normalize keywords once for consistent comparison
-        cyrillic_keywords_normalized = [_normalize_for_matching(kw) for kw in DARNITSA_KEYWORDS_CYRILLIC]
-        latin_keywords_normalized = [kw.lower() for kw in DARNITSA_KEYWORDS_LATIN]
-        
-        # Log all item names for debugging if Darnitsa not found in merchant
-        if not has_darnitsa and line_items:
-            LOGGER.debug("Checking %d line items for Darnitsa keywords. Item names:", len(line_items))
-            for idx, item in enumerate(line_items[:10]):  # Log first 10 items
-                item_name = item.get("original_name") or item.get("name", "")
-                LOGGER.debug("  Item %d: '%s'", idx + 1, item_name[:100])
+        if not line_items:
+            LOGGER.warning("Receipt %s contains no OCR line items", receipt_id)
         
         for item in line_items:
             # Get original text - check both 'name' and 'original_name' fields
@@ -136,34 +85,15 @@ async def evaluate(payload: dict) -> None:
                 LOGGER.debug("Skipping item with empty name: %s", item)
                 continue
             
-            # Normalize for matching (NFC + lowercase)
-            item_normalized = _normalize_for_matching(original_name)
-            # Also create transliterated version for Latin keyword matching
-            item_transliterated = unidecode(item_normalized)
-            
-            # Check for Darnitsa in original text (Cyrillic) - use normalized comparison
-            matched_keyword = None
-            for i, keyword_normalized in enumerate(cyrillic_keywords_normalized):
-                if keyword_normalized in item_normalized:
-                    matched_keyword = DARNITSA_KEYWORDS_CYRILLIC[i]
-                    has_darnitsa = True
-                    LOGGER.info("Found Darnitsa keyword (cyrillic) '%s' in item: '%s' (normalized: '%s')", 
-                              matched_keyword, original_name[:100], item_normalized[:100])
-                    break
-            # Check in transliterated text (Latin) - only if not already found
-            if not has_darnitsa:
-                for i, keyword_normalized in enumerate(latin_keywords_normalized):
-                    if keyword_normalized in item_transliterated:
-                        matched_keyword = DARNITSA_KEYWORDS_LATIN[i]
-                        has_darnitsa = True
-                        LOGGER.info("Found Darnitsa keyword (latin) '%s' in item: '%s' (transliterated: '%s')", 
-                                  matched_keyword, original_name[:100], item_transliterated[:100])
-                        break
-            
-            # Log items that don't match for debugging (only if Darnitsa not found yet)
-            if not has_darnitsa and LOGGER.isEnabledFor(logging.DEBUG):
-                LOGGER.debug("Item does not contain Darnitsa: '%s' (normalized: '%s', transliterated: '%s')", 
-                           original_name[:100], item_normalized[:100], item_transliterated[:100])
+            if not has_darnitsa and _is_darnitsa_item(item):
+                has_darnitsa = True
+                LOGGER.info("Receipt %s: detected Darnitsa prefix in '%s'", receipt_id, original_name[:100])
+            elif not has_darnitsa:
+                LOGGER.debug(
+                    "Receipt %s: item without Darnitsa prefix: '%s'",
+                    receipt_id,
+                    original_name[:100],
+                )
             
             quantity = int(item.get("quantity", 1))
             price = item.get("price")
