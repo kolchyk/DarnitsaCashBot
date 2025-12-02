@@ -68,6 +68,22 @@ def build_structured_payload(
     total_tokens = tokens_by_profile.get("totals", [])
     LOGGER.debug("Processing %d total tokens", len(total_tokens))
     total_candidates = cluster_tokens_by_line(total_tokens, y_threshold=25)
+    
+    # If totals profile didn't find enough tokens, also search in full tokens
+    # (totals might be in the full profile if cropping didn't work well)
+    if len(total_candidates) == 0 or (len(total_candidates) == 1 and total_candidates[0].confidence == 0.0):
+        LOGGER.debug("Totals profile had insufficient tokens, searching in full tokens")
+        full_tokens = tokens_by_profile.get("full", [])
+        if full_tokens:
+            # Get tokens from bottom 15% of receipt (where totals usually are)
+            max_y = max(token.top for token in full_tokens) if full_tokens else 0
+            bottom_threshold = max_y * 0.85
+            bottom_tokens = [token for token in full_tokens if token.top >= bottom_threshold]
+            if bottom_tokens:
+                bottom_candidates = cluster_tokens_by_line(bottom_tokens, y_threshold=25)
+                LOGGER.debug("Found %d candidates in bottom section of full tokens", len(bottom_candidates))
+                total_candidates.extend(bottom_candidates)
+    
     total_amount = _detect_total(total_candidates)
     LOGGER.debug("Detected total amount: %s from %d candidates", total_amount, len(total_candidates))
 
@@ -163,20 +179,51 @@ def _join_tokens(tokens: Iterable[OcrToken]) -> str:
 
 def _extract_merchant(tokens: Sequence[OcrToken], header_height: int) -> str | None:
     """Extract merchant name from OCR tokens, prioritizing Darnitsa detection."""
-    # First, try to find Darnitsa in header tokens
-    header_tokens = [token for token in tokens if token.top <= header_height + 5]
+    if not tokens:
+        return None
+    
+    # Calculate header boundary - use first 20% of receipt height
+    max_header_y = header_height if header_height > 0 else max(token.top for token in tokens) // 5
+    
+    # Get header tokens only (first 20% of receipt)
+    header_tokens = [token for token in tokens if token.top <= max_header_y]
     if not header_tokens:
-        header_tokens = tokens
+        # If no header tokens found, use first 30% as fallback
+        max_y = max(token.top for token in tokens) if tokens else 0
+        header_tokens = [token for token in tokens if token.top <= max_y * 0.3]
+    
+    if not header_tokens:
+        return None
     
     clusters = cluster_tokens_by_line(header_tokens, y_threshold=12)
     if not clusters:
-        # Fallback: search all tokens if header clustering failed
-        clusters = cluster_tokens_by_line(tokens, y_threshold=12)
-        if not clusters:
-            return None
+        return None
     
-    # Search for Darnitsa keywords in header clusters first
+    # Helper function to check if a cluster looks like a product name (not merchant)
+    def _is_product_like(cluster: LineCluster) -> bool:
+        """Check if cluster looks like a product name rather than merchant name."""
+        text = cluster.text.lower()
+        # Product names typically contain:
+        # - Numbers followed by units (mg, мл, табл, etc.)
+        # - Price patterns (numbers with decimal points)
+        # - Quantity patterns (x, ×, шт)
+        product_patterns = [
+            r'\d+\s*(мг|мл|табл|шт|гр|кг|л)',  # Numbers with units
+            r'\d+[.,]\d+\s*(грн|₴|uah)',  # Price patterns
+            r'\d+\s*[xх×]\s*\d+',  # Quantity patterns
+            r'№\s*\d+',  # Product codes
+        ]
+        for pattern in product_patterns:
+            if re.search(pattern, text):
+                return True
+        return False
+    
+    # Search for Darnitsa keywords in header clusters first (excluding product-like clusters)
     for cluster in clusters:
+        if _is_product_like(cluster):
+            LOGGER.debug("Skipping product-like cluster for merchant: '%s'", cluster.text[:50])
+            continue
+            
         text_lower = cluster.text.lower()
         normalized_text = _normalize_text(cluster.text).lower()
         
@@ -190,26 +237,18 @@ def _extract_merchant(tokens: Sequence[OcrToken], header_height: int) -> str | N
             LOGGER.debug("Found Darnitsa merchant (latin) in header: '%s'", cluster.text[:50])
             return cluster.text.strip()
     
-    # If Darnitsa not found in header, search all tokens
-    all_clusters = cluster_tokens_by_line(tokens, y_threshold=12)
-    for cluster in all_clusters:
-        text_lower = cluster.text.lower()
-        normalized_text = _normalize_text(cluster.text).lower()
-        
-        # Check for Darnitsa in original text (Cyrillic)
-        if any(keyword in text_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC):
-            LOGGER.debug("Found Darnitsa merchant (cyrillic) in full text: '%s'", cluster.text[:50])
-            return cluster.text.strip()
-        
-        # Check for Darnitsa in normalized text (transliteration)
-        if any(keyword in normalized_text for keyword in DARNITSA_KEYWORDS_LATIN):
-            LOGGER.debug("Found Darnitsa merchant (latin) in full text: '%s'", cluster.text[:50])
+    # If Darnitsa not found, return first non-product-like header cluster
+    for cluster in clusters:
+        if not _is_product_like(cluster):
+            LOGGER.debug("Using first non-product header cluster as merchant: '%s'", cluster.text[:50])
             return cluster.text.strip()
     
-    # Fallback: return first header cluster (backward compatibility)
-    candidate = clusters[0].text
-    LOGGER.debug("No Darnitsa found, using first header cluster: '%s'", candidate[:50])
-    return candidate.strip()
+    # Last resort: return first header cluster
+    if clusters:
+        LOGGER.debug("Fallback: using first header cluster as merchant: '%s'", clusters[0].text[:50])
+        return clusters[0].text.strip()
+    
+    return None
 
 
 def _extract_purchase_ts(tokens_by_profile: dict[str, list[OcrToken]]):
@@ -306,20 +345,41 @@ def _extract_quantity_and_price(text: str) -> tuple[int, int | None]:
 
 
 def _detect_total(clusters: Sequence[LineCluster]) -> int | None:
+    """Detect total amount from clusters, prioritizing lines with total keywords."""
+    if not clusters:
+        return None
+    
+    # First pass: look for clusters containing total keywords
     for cluster in clusters:
         normalized = _normalize_text(cluster.text).lower()
         if any(keyword in normalized for keyword in TOTAL_KEYWORDS):
-            numbers = re.findall(r"\d+[.,]?\d*", normalized)
+            # Extract numbers from this cluster
+            numbers = re.findall(r"\d+[.,]?\d*", cluster.text)
             if numbers:
-                return _to_minor_units(numbers[-1])
-    # fallback to largest number
+                # Use the last (largest) number in the cluster
+                total = _to_minor_units(numbers[-1])
+                if total and total > 0:
+                    LOGGER.debug("Found total via keyword match: '%s' -> %d", cluster.text[:50], total)
+                    return total
+    
+    # Second pass: look for the largest number in clusters (fallback)
+    # Prioritize clusters with higher confidence
     best = None
+    best_confidence = 0.0
+    
     for cluster in clusters:
         numbers = re.findall(r"\d+[.,]?\d*", cluster.text)
         for number in numbers:
             candidate = _to_minor_units(number)
-            if best is None or (candidate and candidate > best):
-                best = candidate
+            # Prefer larger numbers and higher confidence clusters
+            if candidate and candidate > 0:
+                if best is None or (candidate > best) or (candidate == best and cluster.confidence > best_confidence):
+                    best = candidate
+                    best_confidence = cluster.confidence
+    
+    if best:
+        LOGGER.debug("Found total via largest number: %d (confidence=%.3f)", best, best_confidence)
+    
     return best
 
 
