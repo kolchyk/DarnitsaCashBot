@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from libs.data.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -43,8 +43,8 @@ class LineItem(UUIDPrimaryKeyMixin, Base):
     sku_code: Mapped[str | None] = mapped_column(String(64))
     product_name: Mapped[str] = mapped_column(String(256))
     quantity: Mapped[int] = mapped_column(Integer, default=1)
-    unit_price: Mapped[int] = mapped_column(Integer)  # store in kopecks to avoid float issues
-    total_price: Mapped[int] = mapped_column(Integer)
+    unit_price: Mapped[int] = mapped_column(BigInteger)  # store in kopecks to avoid float issues
+    total_price: Mapped[int] = mapped_column(BigInteger)
     confidence: Mapped[float] = mapped_column(default=0.0)
 
     receipt: Mapped["Receipt"] = relationship(back_populates="line_items")

@@ -81,7 +81,7 @@ async def check_ocr_status(telegram_id: int, receipt_id: str, receipt_client: Re
             
             if darnitsa_products and len(darnitsa_products) > 0:
                 # Build detailed message about found Darnitsa products
-                message_parts = ["✅ Чек успішно оброблено!\n\n"]
+                message_parts = ["✅ Розпізнавання успішне!\n\n"]
                 message_parts.append("🎉 Знайдено препарат(и) Дарниця:\n\n")
                 
                 total_price = 0
@@ -92,15 +92,18 @@ async def check_ocr_status(telegram_id: int, receipt_id: str, receipt_client: Re
                     total_price += price * quantity
                     
                     if quantity > 1:
-                        message_parts.append(f"• {product_name}\n")
-                        message_parts.append(f"  Кількість: {quantity} шт.\n")
-                        message_parts.append(f"  Ціна: {price:.2f} грн за одиницю\n")
-                        message_parts.append(f"  Сума: {price * quantity:.2f} грн\n\n")
+                        message_parts.append(f"📦 {product_name}\n")
+                        message_parts.append(f"   Кількість: {quantity} шт.\n")
+                        message_parts.append(f"   Ціна за одиницю: {price:.2f} грн\n")
+                        message_parts.append(f"   💰 Сума: {price * quantity:.2f} грн\n\n")
                     else:
-                        message_parts.append(f"• {product_name}\n")
-                        message_parts.append(f"  Ціна: {price:.2f} грн\n\n")
+                        message_parts.append(f"📦 {product_name}\n")
+                        message_parts.append(f"   💰 Сума: {price:.2f} грн\n\n")
                 
-                message_parts.append("💰 Бонус буде нараховано!\n\n")
+                if len(darnitsa_products) > 1:
+                    message_parts.append(f"💵 Загальна сума: {total_price:.2f} грн\n\n")
+                
+                message_parts.append("✅ Бонус буде нараховано!\n\n")
                 message_parts.append("💳 Вам буде зараховано 1 грн на мобільний телефон протягом години після підтвердження чека.\n")
                 message_parts.append("Бонус надійде на номер телефону, який ви вказали в профілі.\n\n")
                 message_parts.append("Дякуємо за вибір продукції Дарниця! 🙏")

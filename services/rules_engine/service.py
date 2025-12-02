@@ -116,6 +116,16 @@ async def evaluate(payload: dict) -> None:
                 price = 0
             else:
                 price = int(price)
+                # Validate price: cap at 1 million UAH (100 million kopecks) to prevent
+                # obviously wrong values like phone numbers being saved as prices
+                MAX_REASONABLE_PRICE_KOPECKS = 100_000_000  # 1 million UAH
+                if price > MAX_REASONABLE_PRICE_KOPECKS:
+                    LOGGER.warning(
+                        "Price %d kopecks exceeds reasonable maximum for item '%s', capping to 0",
+                        price,
+                        original_name[:50],
+                    )
+                    price = 0
             confidence = float(item.get("confidence", 0))
             sku_code = item.get("sku_code")  # Use SKU from OCR if available
             
