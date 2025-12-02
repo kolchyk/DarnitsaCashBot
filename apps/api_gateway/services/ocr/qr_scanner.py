@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from io import BytesIO
 
-import cv2
 import numpy as np
 from PIL import Image
 from qreader import QReader
@@ -82,17 +81,6 @@ def _decode_image(image_bytes: bytes) -> np.ndarray | None:
         numpy array in RGB format, or None if decoding fails
     """
     try:
-        # Try OpenCV first (faster)
-        nparr = np.frombuffer(image_bytes, np.uint8)
-        image_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
-        if image_bgr is not None:
-            # Convert BGR to RGB for QReader
-            image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-            return image_rgb
-        
-        # Fallback to PIL if OpenCV fails
-        LOGGER.debug("OpenCV decode failed, trying PIL")
         pil_image = Image.open(BytesIO(image_bytes))
         if pil_image.mode != "RGB":
             pil_image = pil_image.convert("RGB")
