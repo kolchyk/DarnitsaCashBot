@@ -81,6 +81,7 @@ class AppSettings(BaseSettings):
     portmone_version: str = Field(default="2", alias="PORTMONE_VERSION")
     portmone_lang: str | None = Field(default=None, alias="PORTMONE_LANG")
     portmone_cert_path: Path | None = Field(default=None, alias="PORTMONE_CERT_PATH")
+    portmone_key_path: Path | None = Field(default=None, alias="PORTMONE_KEY_PATH")
     portmone_payee_id: str = Field(default="100000", alias="PORTMONE_PAYEE_ID")
     portmone_payee_id_kyivstar: str | None = Field(default=None, alias="PORTMONE_PAYEE_ID_KYIVSTAR")
     portmone_payee_id_vodafone: str | None = Field(default=None, alias="PORTMONE_PAYEE_ID_VODAFONE")

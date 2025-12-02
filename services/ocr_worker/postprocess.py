@@ -59,6 +59,10 @@ def build_structured_payload(
     sku_matches = 0
     for cluster in line_clusters:
         item = _line_item_from_cluster(cluster, catalog_aliases)
+        # Filter out merchant name from line items
+        if _is_merchant_name(item, merchant):
+            LOGGER.debug("Filtering out merchant name from line items: '%s'", item.get("name", "")[:50])
+            continue
         line_items.append(item)
         if item.get("sku_code"):
             sku_matches += 1
@@ -310,6 +314,72 @@ def _extract_purchase_ts(tokens_by_profile: dict[str, list[OcrToken]]):
                 continue
     
     return None
+
+
+def _is_merchant_name(item: dict[str, Any], merchant: str | None) -> bool:
+    """Check if a line item is actually the merchant name (not a product)."""
+    if not merchant:
+        return False
+    
+    item_name = item.get("original_name") or item.get("name", "")
+    if not item_name:
+        return False
+    
+    # Normalize both for comparison
+    item_normalized = _normalize_text(item_name).lower()
+    merchant_normalized = _normalize_text(merchant).lower()
+    
+    # Check if item name matches merchant name (allowing for partial matches)
+    # If item is very similar to merchant name, it's likely the merchant name
+    if merchant_normalized in item_normalized or item_normalized in merchant_normalized:
+        # But only filter if it doesn't have product-like patterns
+        # (if it has prices, quantities, etc., it might be a product with merchant name)
+        if not _has_product_patterns(item_name):
+            LOGGER.debug("Item matches merchant name and has no product patterns: '%s'", item_name[:50])
+            return True
+    
+    # Also check if item only contains Darnitsa keywords without product patterns
+    item_lower = item_name.lower()
+    normalized_item = _normalize_text(item_name).lower()
+    
+    # Check for Darnitsa keywords
+    has_darnitsa_keyword = (
+        any(keyword in item_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC) or
+        any(keyword in normalized_item for keyword in DARNITSA_KEYWORDS_LATIN)
+    )
+    
+    # If it has Darnitsa keyword but no product patterns and no price/quantity, it's likely merchant name
+    if has_darnitsa_keyword and not _has_product_patterns(item_name):
+        # Check if it has no meaningful price or quantity
+        price = item.get("price")
+        quantity = item.get("quantity", 1)
+        if (price is None or price == 0) and quantity == 1:
+            LOGGER.debug("Item contains Darnitsa keyword but no product patterns: '%s'", item_name[:50])
+            return True
+    
+    return False
+
+
+def _has_product_patterns(text: str) -> bool:
+    """Check if text contains product-like patterns (numbers, prices, quantities, units)."""
+    text_lower = text.lower()
+    # Product patterns:
+    # - Numbers followed by units (mg, мл, табл, etc.)
+    # - Price patterns (numbers with decimal points, currency symbols)
+    # - Quantity patterns (x, ×, шт)
+    # - Product codes (№, codes)
+    product_patterns = [
+        r'\d+\s*(мг|мл|табл|шт|гр|кг|л|mg|ml|tab|pcs)',  # Numbers with units
+        r'\d+[.,]\d+\s*(грн|₴|uah|usd|eur)',  # Price patterns
+        r'\d+\s*[xх×]\s*\d+',  # Quantity patterns
+        r'№\s*\d+',  # Product codes
+        r'\d+\s*шт',  # Quantity in Ukrainian
+        r'x\s*\d+',  # Quantity pattern
+    ]
+    for pattern in product_patterns:
+        if re.search(pattern, text_lower):
+            return True
+    return False
 
 
 def _line_item_from_cluster(cluster: LineCluster, catalog_aliases: dict[str, list[str]]) -> dict[str, Any]:

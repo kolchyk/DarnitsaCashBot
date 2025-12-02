@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ssl
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -90,9 +91,48 @@ class PortmoneDirectClient:
         if self.settings.portmone_cert_path:
             cert_path = Path(self.settings.portmone_cert_path)
             if cert_path.exists() and cert_path.is_file():
-                cert = str(cert_path)
+                # Check if we have a separate key file
+                if self.settings.portmone_key_path:
+                    key_path = Path(self.settings.portmone_key_path)
+                    if key_path.exists() and key_path.is_file():
+                        # Use tuple format for separate cert and key files
+                        cert = (str(cert_path), str(key_path))
+                    else:
+                        raise ValueError(
+                            f"Portmone key file not found: {self.settings.portmone_key_path}"
+                        )
+                else:
+                    # Single file should contain both certificate and private key in PEM format
+                    # For client certificate authentication, the file should contain:
+                    # -----BEGIN CERTIFICATE-----
+                    # ...certificate data...
+                    # -----END CERTIFICATE-----
+                    # -----BEGIN PRIVATE KEY-----
+                    # ...private key data...
+                    # -----END PRIVATE KEY-----
+                    cert = str(cert_path)
         self._owns_client = client is None
-        self._client = client or httpx.AsyncClient(base_url=base, cert=cert, timeout=timeout)
+        
+        # Configure SSL context for TLS 1.2 (Portmone only supports TLS 1.2)
+        # According to Portmone docs: "на даний момент сервером підтримується тільки протокол TLS 1.2"
+        # Only apply SSL context for HTTPS URLs (not for HTTP mock servers)
+        ssl_context = None
+        if base.startswith("https://"):
+            ssl_context = ssl.create_default_context()
+            # Enforce TLS 1.2 (Portmone requirement)
+            ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
+            ssl_context.maximum_version = ssl.TLSVersion.TLSv1_2
+            # Verify server certificate
+            ssl_context.check_hostname = True
+            ssl_context.verify_mode = ssl.CERT_REQUIRED
+        
+        # For Portmone API with client certificate, verify server cert and send client cert
+        self._client = client or httpx.AsyncClient(
+            base_url=base, 
+            cert=cert, 
+            timeout=timeout,
+            verify=ssl_context if ssl_context else True  # Use custom SSL context with TLS 1.2 enforcement for HTTPS
+        )
 
     async def call(self, method: str, **params: Any) -> PortmoneResponse:
         payload = {"method": method, **self._auth, **params}
