@@ -4,7 +4,6 @@
 import argparse
 import asyncio
 import os
-import ssl
 import sys
 from pathlib import Path
 
@@ -50,44 +49,37 @@ async def test_topup(phone_number: str, amount: float, use_mock: bool = False):
     if settings.portmone_lang:
         payload["lang"] = settings.portmone_lang
     
+    # Подготовка клиентского сертификата для mTLS
     cert = None
     if settings.portmone_cert_path:
         cert_path = Path(settings.portmone_cert_path)
-        if cert_path.exists() and cert_path.is_file():
-            # Check if we have a separate key file
-            if settings.portmone_key_path:
-                key_path = Path(settings.portmone_key_path)
-                if key_path.exists() and key_path.is_file():
-                    # Use tuple format for separate cert and key files
-                    cert = (str(cert_path), str(key_path))
-                else:
-                    print(f"Ошибка: файл ключа не найден: {settings.portmone_key_path}")
-                    return False
-            else:
-                # Single file should contain both certificate and private key in PEM format
-                cert = str(cert_path)
-        else:
+        if not cert_path.exists() or not cert_path.is_file():
             print(f"Ошибка: файл сертификата не найден: {settings.portmone_cert_path}")
             return False
+        
+        if settings.portmone_key_path:
+            key_path = Path(settings.portmone_key_path)
+            if not key_path.exists() or not key_path.is_file():
+                print(f"Ошибка: файл ключа не найден: {settings.portmone_key_path}")
+                return False
+            # Используем кортеж для раздельных файлов cert и key
+            cert = (str(cert_path), str(key_path))
+        else:
+            # Один файл должен содержать и сертификат, и приватный ключ в PEM формате
+            cert = str(cert_path)
+    
+    # Настройка verify для проверки серверного сертификата
+    # По умолчанию используем стандартную проверку (публичные CA)
+    # Если Portmone предоставил свой CA, можно добавить portmone_ca_path в config
+    verify = True
     
     try:
-        # Configure SSL context for TLS 1.2 (Portmone only supports TLS 1.2)
-        # Only apply SSL context for HTTPS URLs (not for HTTP mock servers)
-        ssl_context = None
-        if settings.portmone_api_base.startswith("https://"):
-            ssl_context = ssl.create_default_context()
-            # Enforce TLS 1.2 (Portmone requirement)
-            ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
-            ssl_context.maximum_version = ssl.TLSVersion.TLSv1_2
-            # Verify server certificate
-            ssl_context.check_hostname = True
-            ssl_context.verify_mode = ssl.CERT_REQUIRED
-        
-        # For Portmone API with client certificate, we need to verify server cert and send client cert
+        # httpx автоматически использует TLS 1.2+ и правильно передает клиентский сертификат
+        # при указании параметра cert
         async with httpx.AsyncClient(
-            timeout=30.0, 
+            timeout=30.0,
             cert=cert,
-            verify=ssl_context if ssl_context else True  # Use custom SSL context with TLS 1.2 for HTTPS, default for HTTP
+            verify=verify,
         ) as http_client:
             response = await http_client.post(
                 settings.portmone_api_base.rstrip("/") + "/",

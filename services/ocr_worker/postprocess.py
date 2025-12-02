@@ -228,18 +228,29 @@ def _extract_merchant(tokens: Sequence[OcrToken], header_height: int) -> str | N
             LOGGER.debug("Skipping product-like cluster for merchant: '%s'", cluster.text[:50])
             continue
             
-        text_lower = cluster.text.lower()
+        # Normalize Unicode (NFC) before lowercasing to ensure consistent matching
+        # This matches the normalization used in rules_engine/service.py
+        text_normalized = unicodedata.normalize("NFC", cluster.text).lower()
         normalized_text = _normalize_text(cluster.text).lower()
         
-        # Check for Darnitsa in original text (Cyrillic)
-        if any(keyword in text_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC):
-            LOGGER.debug("Found Darnitsa merchant (cyrillic) in header: '%s'", cluster.text[:50])
-            return cluster.text.strip()
+        # Normalize keywords for consistent comparison (same as rules_engine)
+        cyrillic_keywords_normalized = [unicodedata.normalize("NFC", kw).lower() for kw in DARNITSA_KEYWORDS_CYRILLIC]
+        latin_keywords_normalized = [kw.lower() for kw in DARNITSA_KEYWORDS_LATIN]
+        
+        # Check for Darnitsa in original text (Cyrillic) - use normalized comparison
+        matched_keyword = None
+        for i, keyword_normalized in enumerate(cyrillic_keywords_normalized):
+            if keyword_normalized in text_normalized:
+                matched_keyword = DARNITSA_KEYWORDS_CYRILLIC[i]
+                LOGGER.debug("Found Darnitsa merchant (cyrillic) '%s' in header: '%s'", matched_keyword, cluster.text[:50])
+                return cluster.text.strip()
         
         # Check for Darnitsa in normalized text (transliteration)
-        if any(keyword in normalized_text for keyword in DARNITSA_KEYWORDS_LATIN):
-            LOGGER.debug("Found Darnitsa merchant (latin) in header: '%s'", cluster.text[:50])
-            return cluster.text.strip()
+        for i, keyword_normalized in enumerate(latin_keywords_normalized):
+            if keyword_normalized in normalized_text:
+                matched_keyword = DARNITSA_KEYWORDS_LATIN[i]
+                LOGGER.debug("Found Darnitsa merchant (latin) '%s' in header: '%s'", matched_keyword, cluster.text[:50])
+                return cluster.text.strip()
     
     # If Darnitsa not found, return first non-product-like header cluster
     for cluster in clusters:
@@ -339,13 +350,18 @@ def _is_merchant_name(item: dict[str, Any], merchant: str | None) -> bool:
             return True
     
     # Also check if item only contains Darnitsa keywords without product patterns
-    item_lower = item_name.lower()
+    # Normalize Unicode (NFC) before lowercasing to ensure consistent matching
+    item_normalized = unicodedata.normalize("NFC", item_name).lower()
     normalized_item = _normalize_text(item_name).lower()
     
-    # Check for Darnitsa keywords
+    # Normalize keywords for consistent comparison (same as rules_engine)
+    cyrillic_keywords_normalized = [unicodedata.normalize("NFC", kw).lower() for kw in DARNITSA_KEYWORDS_CYRILLIC]
+    latin_keywords_normalized = [kw.lower() for kw in DARNITSA_KEYWORDS_LATIN]
+    
+    # Check for Darnitsa keywords - use normalized comparison
     has_darnitsa_keyword = (
-        any(keyword in item_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC) or
-        any(keyword in normalized_item for keyword in DARNITSA_KEYWORDS_LATIN)
+        any(keyword_normalized in item_normalized for keyword_normalized in cyrillic_keywords_normalized) or
+        any(keyword_normalized in normalized_item for keyword_normalized in latin_keywords_normalized)
     )
     
     # If it has Darnitsa keyword but no product patterns and no price/quantity, it's likely merchant name

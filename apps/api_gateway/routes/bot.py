@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import unicodedata
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -141,17 +142,23 @@ def _filter_darnitsa_products(
         for item in ocr_line_items
     }
     
+    # Normalize keywords for consistent comparison (same as rules_engine)
+    cyrillic_keywords_normalized = [unicodedata.normalize("NFC", kw).lower() for kw in DARNITSA_KEYWORDS_CYRILLIC]
+    latin_keywords_normalized = [kw.lower() for kw in DARNITSA_KEYWORDS_LATIN]
+    
     for item in line_items:
-        name_lower = item.product_name.lower()
+        # Normalize Unicode (NFC) before lowercasing to ensure consistent matching
+        name_normalized = unicodedata.normalize("NFC", item.product_name).lower()
         # Check normalized name (transliteration)
-        found = any(keyword in name_lower for keyword in DARNITSA_KEYWORDS_LATIN)
+        found = any(keyword_normalized in name_normalized for keyword_normalized in latin_keywords_normalized)
         
         # If not found, check original name from OCR payload
         if not found and ocr_name_map:
             original_name = ocr_name_map.get(item.product_name, "")
             if original_name:
-                original_lower = original_name.lower()
-                found = any(keyword in original_lower for keyword in DARNITSA_KEYWORDS_CYRILLIC)
+                # Normalize Unicode (NFC) before lowercasing
+                original_normalized = unicodedata.normalize("NFC", original_name).lower()
+                found = any(keyword_normalized in original_normalized for keyword_normalized in cyrillic_keywords_normalized)
         
         if found:
             # Convert price from kopecks to UAH

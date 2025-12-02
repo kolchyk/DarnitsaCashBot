@@ -80,9 +80,26 @@ class PortmoneDirectClient:
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.settings = settings or get_settings()
+        
+        # Validate credentials
+        login = self.settings.portmone_login
+        password = self.settings.portmone_password
+        
+        if not login or login == "demo_login":
+            raise ValueError(
+                "PORTMONE_LOGIN не установлен или использует значение по умолчанию. "
+                "Установите правильный логин через переменную окружения PORTMONE_LOGIN."
+            )
+        
+        if not password or password == "demo_password":
+            raise ValueError(
+                "PORTMONE_PASSWORD не установлен или использует значение по умолчанию. "
+                "Установите правильный пароль через переменную окружения PORTMONE_PASSWORD."
+            )
+        
         self._auth = {
-            "login": self.settings.portmone_login,
-            "password": self.settings.portmone_password,
+            "login": login,
+            "password": password,
             "version": self.settings.portmone_version,
         }
         self._lang = self.settings.portmone_lang
@@ -135,11 +152,32 @@ class PortmoneDirectClient:
         )
 
     async def call(self, method: str, **params: Any) -> PortmoneResponse:
+        """
+        Вызывает метод Portmone API.
+        
+        Параметры авторизации (login, password, version) автоматически добавляются к запросу.
+        Параметры передаются в формате application/x-www-form-urlencoded согласно документации Portmone.
+        
+        Args:
+            method: Название метода API (например, "bills.create")
+            **params: Дополнительные параметры для метода
+            
+        Returns:
+            PortmoneResponse: Ответ от API
+            
+        Raises:
+            PortmoneTransportError: При ошибках сети или TLS
+            PortmoneResponseError: При ошибках API (включая ошибки авторизации)
+        """
+        # Формируем payload: сначала метод, затем авторизация, затем параметры метода
+        # Порядок важен согласно документации Portmone
         payload = {"method": method, **self._auth, **params}
         if self._lang:
             payload["lang"] = self._lang
 
         try:
+            # httpx автоматически преобразует словарь в application/x-www-form-urlencoded
+            # и устанавливает правильный Content-Type заголовок
             response = await self._client.post("", data=payload)
             response.raise_for_status()
         except httpx.HTTPError as exc:  # pragma: no cover - delegated to retry logic
@@ -147,6 +185,22 @@ class PortmoneDirectClient:
 
         parsed = parse_portmone_response(response.text)
         if parsed.status != "ok":
+            # Проверяем, не является ли это ошибкой авторизации
+            if parsed.errors:
+                for error in parsed.errors:
+                    error_code = error.code or ""
+                    error_msg = error.message or ""
+                    # Типичные коды ошибок авторизации в Portmone
+                    if any(keyword in error_code.lower() or keyword in error_msg.lower() 
+                           for keyword in ["auth", "login", "password", "unauthorized", "авторизац"]):
+                        error_msg_full = (
+                            f"Ошибка авторизации Portmone: {error_code} - {error_msg}. "
+                            f"Проверьте PORTMONE_LOGIN и PORTMONE_PASSWORD."
+                        )
+                        # Создаем исключение с улучшенным сообщением
+                        auth_error = PortmoneResponseError(parsed)
+                        auth_error.args = (error_msg_full,) + auth_error.args
+                        raise auth_error
             raise PortmoneResponseError(parsed)
         return parsed
 
