@@ -20,7 +20,6 @@ class BonusContext:
     bonus_id: UUID
     msisdn: str
     amount: int
-    payee_id: str
     contract_number: str
     currency: str
     telegram_id: int | None
@@ -146,7 +145,6 @@ async def _prepare_bonus_context(
             bonus_id=bonus.id,
             msisdn=phone_normalized,
             amount=bonus.amount,
-            payee_id="",
             contract_number=phone_normalized,
             currency=bonus.currency,
             telegram_id=user.telegram_id if user else None,

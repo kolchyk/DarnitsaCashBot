@@ -29,7 +29,7 @@ msgstr ""
 "Поділіться номером телефону, щоб ми могли надсилати поповнення 1₴ за кожен прийнятий чек. {consent}"
 
 msgid ""
-"Welcome to DarnitsaCashBot! Share your phone number so we can send 1₴ PortmoneDirect "
+"Welcome to DarnitsaCashBot! Share your phone number so we can send 1₴ "
 "top-ups for each approved receipt. {consent}"
 msgstr ""
 "Вітаємо в DarnitsaCashBot! Ми нараховуємо бонуси за препарати Дарниця. Потрібне фото чека.\n\n"

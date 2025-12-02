@@ -138,10 +138,6 @@ async def inspect_database():
                     print(f"  Amount: {bonus.amount} kopecks ({amount_uah:.2f} UAH)")
                     print(f"  Status: {bonus.payout_status}")
                     print(f"  Provider: {bonus.provider}")
-                    if bonus.portmone_status:
-                        print(f"  Portmone Status: {bonus.portmone_status}")
-                    if bonus.portmone_error_code:
-                        print(f"  Portmone Error: {bonus.portmone_error_code}")
                     print(f"  Created: {bonus.created_at}")
                     print()
             
