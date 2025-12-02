@@ -122,9 +122,20 @@ async def evaluate(payload: dict) -> None:
         cyrillic_keywords_normalized = [_normalize_for_matching(kw) for kw in DARNITSA_KEYWORDS_CYRILLIC]
         latin_keywords_normalized = [kw.lower() for kw in DARNITSA_KEYWORDS_LATIN]
         
+        # Log all item names for debugging if Darnitsa not found in merchant
+        if not has_darnitsa and line_items:
+            LOGGER.debug("Checking %d line items for Darnitsa keywords. Item names:", len(line_items))
+            for idx, item in enumerate(line_items[:10]):  # Log first 10 items
+                item_name = item.get("original_name") or item.get("name", "")
+                LOGGER.debug("  Item %d: '%s'", idx + 1, item_name[:100])
+        
         for item in line_items:
-            # Get original text (now 'name' contains original text, not normalized)
-            original_name = item.get("name", "")
+            # Get original text - check both 'name' and 'original_name' fields
+            original_name = item.get("original_name") or item.get("name", "")
+            if not original_name:
+                LOGGER.debug("Skipping item with empty name: %s", item)
+                continue
+            
             # Normalize for matching (NFC + lowercase)
             item_normalized = _normalize_for_matching(original_name)
             # Also create transliterated version for Latin keyword matching
@@ -136,16 +147,23 @@ async def evaluate(payload: dict) -> None:
                 if keyword_normalized in item_normalized:
                     matched_keyword = DARNITSA_KEYWORDS_CYRILLIC[i]
                     has_darnitsa = True
-                    LOGGER.info("Found Darnitsa keyword (cyrillic) '%s' in item: '%s'", matched_keyword, original_name[:50])
+                    LOGGER.info("Found Darnitsa keyword (cyrillic) '%s' in item: '%s' (normalized: '%s')", 
+                              matched_keyword, original_name[:100], item_normalized[:100])
                     break
-            # Check in transliterated text (Latin)
+            # Check in transliterated text (Latin) - only if not already found
             if not has_darnitsa:
                 for i, keyword_normalized in enumerate(latin_keywords_normalized):
                     if keyword_normalized in item_transliterated:
                         matched_keyword = DARNITSA_KEYWORDS_LATIN[i]
                         has_darnitsa = True
-                        LOGGER.info("Found Darnitsa keyword (latin) '%s' in item: '%s'", matched_keyword, original_name[:50])
+                        LOGGER.info("Found Darnitsa keyword (latin) '%s' in item: '%s' (transliterated: '%s')", 
+                                  matched_keyword, original_name[:100], item_transliterated[:100])
                         break
+            
+            # Log items that don't match for debugging (only if Darnitsa not found yet)
+            if not has_darnitsa and LOGGER.isEnabledFor(logging.DEBUG):
+                LOGGER.debug("Item does not contain Darnitsa: '%s' (normalized: '%s', transliterated: '%s')", 
+                           original_name[:100], item_normalized[:100], item_transliterated[:100])
             
             quantity = int(item.get("quantity", 1))
             price = item.get("price")
@@ -195,22 +213,27 @@ async def evaluate(payload: dict) -> None:
                 has_darnitsa,
             )
         else:
+            # Log detailed rejection information
+            item_names_sample = [item.get("original_name") or item.get("name", "")[:50] 
+                                for item in line_items[:5]]
             LOGGER.warning(
-                "Receipt %s REJECTED: reason=%s, line_items=%d, has_darnitsa=%s, merchant=%s",
+                "Receipt %s REJECTED: reason=%s, line_items=%d, has_darnitsa=%s, merchant=%s, sample_items=%s",
                 receipt_id,
                 rejection_reason,
                 len(line_items),
                 has_darnitsa,
                 receipt.merchant[:50] if receipt.merchant else "None",
+                item_names_sample,
             )
             # Also log at INFO level for better visibility
             LOGGER.info(
-                "Receipt %s REJECTED: reason=%s, line_items=%d, has_darnitsa=%s, merchant=%s",
+                "Receipt %s REJECTED: reason=%s, line_items=%d, has_darnitsa=%s, merchant=%s, sample_items=%s",
                 receipt_id,
                 rejection_reason,
                 len(line_items),
                 has_darnitsa,
                 receipt.merchant[:50] if receipt.merchant else "None",
+                item_names_sample,
             )
         
         await session.commit()
