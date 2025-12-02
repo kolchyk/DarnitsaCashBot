@@ -6,11 +6,14 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy.orm import selectinload
+
 from libs.common import get_settings
 from libs.common.darnitsa import has_darnitsa_prefix
 from libs.common.storage import StorageClient
 from libs.data import async_session_factory
 from libs.data.models import Receipt, ReceiptStatus
+from sqlalchemy import select
 
 from .qr_scanner import QRCodeNotFoundError, detect_qr_code
 from .receipt_scraper import ScrapingError, scrape_receipt_data
@@ -30,7 +33,11 @@ async def process_message(payload: dict) -> None:
     )
     
     async with async_session_factory() as session:
-        receipt: Receipt | None = await session.get(Receipt, receipt_id)
+        # Load receipt with user relationship to get telegram_id
+        result = await session.execute(
+            select(Receipt).options(selectinload(Receipt.user)).where(Receipt.id == receipt_id)
+        )
+        receipt: Receipt | None = result.scalar_one_or_none()
         if not receipt:
             LOGGER.warning("Receipt %s not found in database", receipt_id)
             return
@@ -79,19 +86,45 @@ async def process_message(payload: dict) -> None:
             
         except QRCodeNotFoundError as exc:
             LOGGER.warning("QR code not found for receipt %s: %s", receipt_id, exc, exc_info=True)
+            # Get telegram_id before commit to ensure user is loaded
+            telegram_id = receipt.user.telegram_id if receipt.user else None
             receipt.status = ReceiptStatus.REJECTED
             failure_payload = {"error": str(exc), "type": "qr_code_not_found"}
             receipt.ocr_payload = failure_payload
             await session.commit()
             await _publish_failure(payload, failure_payload)
+            if telegram_id:
+                await _notify_receipt_error(telegram_id, receipt_id, "qr_code_not_found")
+            else:
+                LOGGER.warning("Cannot send error notification: receipt %s has no user or telegram_id", receipt_id)
+            return
+        except ScrapingError as exc:
+            LOGGER.error("Scraping failed for receipt %s: %s", receipt_id, exc, exc_info=True)
+            # Get telegram_id before commit to ensure user is loaded
+            telegram_id = receipt.user.telegram_id if receipt.user else None
+            receipt.status = ReceiptStatus.REJECTED
+            failure_payload = {"error": str(exc), "type": "scraping_error"}
+            receipt.ocr_payload = failure_payload
+            await session.commit()
+            await _publish_failure(payload, failure_payload)
+            if telegram_id:
+                await _notify_receipt_error(telegram_id, receipt_id, "scraping_error")
+            else:
+                LOGGER.warning("Cannot send error notification: receipt %s has no user or telegram_id", receipt_id)
             return
         except Exception as exc:
             LOGGER.error("Unexpected error processing receipt %s: %s", receipt_id, exc, exc_info=True)
+            # Get telegram_id before commit to ensure user is loaded
+            telegram_id = receipt.user.telegram_id if receipt.user else None
             receipt.status = ReceiptStatus.REJECTED
             failure_payload = {"error": f"Unexpected error: {str(exc)}", "type": "processing_error"}
             receipt.ocr_payload = failure_payload
             await session.commit()
             await _publish_failure(payload, failure_payload)
+            if telegram_id:
+                await _notify_receipt_error(telegram_id, receipt_id, "processing_error")
+            else:
+                LOGGER.warning("Cannot send error notification: receipt %s has no user or telegram_id", receipt_id)
             return
 
         # Step 3: Enrich scraped line items with Darnitsa detection
@@ -172,4 +205,57 @@ async def process_message(payload: dict) -> None:
 async def _publish_failure(payload: dict, failure_payload: dict) -> None:
     # RabbitMQ removed - failures are now stored in database only
     pass
+
+
+async def _notify_receipt_error(telegram_id: int, receipt_id: UUID, error_type: str) -> None:
+    """Send error notification to user via Telegram."""
+    LOGGER.info("Attempting to send error notification to user %s for receipt %s (error_type=%s)", telegram_id, receipt_id, error_type)
+    
+    settings = get_settings()
+    from apps.api_gateway.services.telegram_notifier import TelegramNotifier
+    
+    notifier = TelegramNotifier(settings)
+    try:
+        if error_type == "qr_code_not_found":
+            message = (
+                "❌ <b>Чек не розпізнано</b>\n\n"
+                "На жаль, не вдалося знайти QR код на зображенні чека.\n\n"
+                "Переконайтеся, що:\n"
+                "• Зображення чітке та добре освітлене\n"
+                "• QR код видно на фото\n"
+                "• Фото не розмите\n\n"
+                "Спробуйте зробити фото ще раз або надішліть чек вручну."
+            )
+        elif error_type == "scraping_error":
+            message = (
+                "❌ <b>Не вдалося отримати позиції з чека</b>\n\n"
+                "На жаль, не вдалося отримати інформацію про товари з сайту податкової служби.\n\n"
+                "Можливі причини:\n"
+                "• Сайт тимчасово недоступний\n"
+                "• Чек не знайдено в системі\n"
+                "• Помилка при обробці даних\n\n"
+                "Спробуйте надіслати чек ще раз пізніше або введіть дані вручну."
+            )
+        else:
+            message = (
+                "❌ <b>Помилка обробки чека</b>\n\n"
+                "На жаль, сталася помилка при обробці вашого чека.\n\n"
+                "Будь ласка, спробуйте надіслати чек ще раз або зверніться до підтримки."
+            )
+        
+        success = await notifier.send_message(telegram_id, message)
+        if success:
+            LOGGER.info("Successfully sent error notification to user %s for receipt %s (error_type=%s)", telegram_id, receipt_id, error_type)
+        else:
+            LOGGER.warning("Failed to send error notification to user %s for receipt %s (error_type=%s)", telegram_id, receipt_id, error_type)
+    except Exception as e:
+        LOGGER.error(
+            "Exception while sending error notification to user %s for receipt %s: %s",
+            telegram_id,
+            receipt_id,
+            e,
+            exc_info=True,
+        )
+    finally:
+        await notifier.close()
 
