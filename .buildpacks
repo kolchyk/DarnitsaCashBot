@@ -1,2 +1,2 @@
-https://github.com/heroku/heroku-buildpack-apt.git
+heroku-community/apt
 heroku/python

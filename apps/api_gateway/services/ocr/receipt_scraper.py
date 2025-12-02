@@ -7,14 +7,6 @@ from html.parser import HTMLParser
 from typing import Any
 
 import httpx
-from pendulum import parse as parse_datetime
-
-# Optional import for browser automation
-try:
-    from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-    PLAYWRIGHT_AVAILABLE = True
-except ImportError:
-    PLAYWRIGHT_AVAILABLE = False
 
 LOGGER = logging.getLogger(__name__)
 
@@ -92,23 +84,12 @@ def scrape_receipt_data(url: str) -> dict[str, Any]:
     LOGGER.info("Starting receipt scraping: url=%s", url)
     
     try:
-        # Try to fetch with browser automation first (for Angular apps with button clicks)
-        html_content = None
-        if PLAYWRIGHT_AVAILABLE:
-            try:
-                html_content = _fetch_with_playwright_and_search(url)
-                if html_content:
-                    LOGGER.debug("Page fetched with Playwright (after search): content_length=%d", len(html_content))
-            except Exception as e:
-                LOGGER.debug("Playwright fetch failed, falling back to httpx: %s", e)
-        
-        # Fallback to simple HTTP request
-        if not html_content:
-            with httpx.Client(timeout=30.0, follow_redirects=True) as client:
-                response = client.get(url)
-                response.raise_for_status()
-                html_content = response.text
-                LOGGER.debug("Page fetched with httpx: status=%d, content_length=%d", response.status_code, len(html_content))
+        # Fetch page content with httpx
+        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+            response = client.get(url)
+            response.raise_for_status()
+            html_content = response.text
+            LOGGER.debug("Page fetched with httpx: status=%d, content_length=%d", response.status_code, len(html_content))
         
         # Parse HTML with standard library parser
         parser = SimpleHTMLParser()
@@ -214,6 +195,35 @@ def _extract_merchant(page_text: str, html_content: str) -> str | None:
     return None
 
 
+def _parse_datetime(dt_str: str) -> datetime | None:
+    """Parse datetime string in various formats using standard library."""
+    # Common datetime formats to try
+    formats = [
+        "%Y-%m-%d %H:%M",           # 2024-12-01 14:30
+        "%Y-%m-%d %H:%M:%S",        # 2024-12-01 14:30:45
+        "%d.%m.%Y %H:%M",           # 01.12.2024 14:30
+        "%d.%m.%Y %H:%M:%S",        # 01.12.2024 14:30:45
+        "%d/%m/%Y %H:%M",           # 01/12/2024 14:30
+        "%d/%m/%Y %H:%M:%S",        # 01/12/2024 14:30:45
+        "%d-%m-%Y %H:%M",           # 01-12-2024 14:30
+        "%d-%m-%Y %H:%M:%S",        # 01-12-2024 14:30:45
+    ]
+    
+    for fmt in formats:
+        try:
+            return datetime.strptime(dt_str, fmt)
+        except ValueError:
+            continue
+    
+    # Try ISO format as last resort
+    try:
+        return datetime.fromisoformat(dt_str.replace(" ", "T"))
+    except (ValueError, AttributeError):
+        pass
+    
+    return None
+
+
 def _extract_purchase_timestamp(page_text: str, url: str) -> datetime | None:
     """Extract purchase timestamp from the receipt page or URL."""
     # Try to extract from URL parameters first
@@ -224,9 +234,9 @@ def _extract_purchase_timestamp(page_text: str, url: str) -> datetime | None:
         date_str = date_match.group(1)
         time_str = f"{time_match.group(1)}:{time_match.group(2)}"
         try:
-            # Format: YYYYMMDD HH:MM
+            # Format: YYYYMMDD HH:MM -> YYYY-MM-DD HH:MM
             dt_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]} {time_str}"
-            return parse_datetime(dt_str)
+            return _parse_datetime(dt_str)
         except Exception:
             pass
     
@@ -241,7 +251,9 @@ def _extract_purchase_timestamp(page_text: str, url: str) -> datetime | None:
         if match:
             try:
                 dt_str = f"{match.group(1)} {match.group(2)}"
-                return parse_datetime(dt_str)
+                parsed = _parse_datetime(dt_str)
+                if parsed:
+                    return parsed
             except Exception:
                 continue
     
@@ -371,92 +383,4 @@ def _extract_total(page_text: str, line_items: list[dict[str, Any]]) -> int | No
     return None
 
 
-def _fetch_with_playwright_and_search(url: str) -> str | None:
-    """
-    Fetch page content using Playwright, click 'пошук' button and wait for receipt data.
-    
-    Args:
-        url: URL to the receipt page
-        
-    Returns:
-        HTML content after clicking search button, or None if failed
-    """
-    if not PLAYWRIGHT_AVAILABLE:
-        return None
-    
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            
-            # Navigate to page
-            LOGGER.debug("Navigating to URL with Playwright: %s", url)
-            page.goto(url, wait_until="networkidle", timeout=30000)
-            
-            # Wait for page to load
-            page.wait_for_timeout(2000)  # Wait 2 seconds for Angular to initialize
-            
-            # Try to find and click "пошук" button
-            # Possible button texts: "пошук", "Пошук", "ПОШУК", "Search", etc.
-            search_button_selectors = [
-                'button:has-text("пошук")',
-                'button:has-text("Пошук")',
-                'button:has-text("ПОШУК")',
-                'button:has-text("поиск")',
-                'button:has-text("Поиск")',
-                'button[type="submit"]',
-                'input[type="submit"][value*="пошук"]',
-                'input[type="submit"][value*="Пошук"]',
-                '.btn-search',
-                '#search-button',
-                '[class*="search"]',
-                '[class*="Search"]',
-            ]
-            
-            button_clicked = False
-            for selector in search_button_selectors:
-                try:
-                    button = page.locator(selector).first
-                    if button.is_visible(timeout=5000):
-                        LOGGER.debug("Found search button with selector: %s", selector)
-                        button.click()
-                        button_clicked = True
-                        LOGGER.debug("Clicked search button")
-                        break
-                except Exception:
-                    continue
-            
-            if not button_clicked:
-                # Try to find button by Ukrainian text
-                try:
-                    button = page.get_by_text("пошук", exact=False).first
-                    if button.is_visible(timeout=5000):
-                        button.click()
-                        button_clicked = True
-                        LOGGER.debug("Clicked search button by text")
-                except Exception:
-                    pass
-            
-            if button_clicked:
-                # Wait for receipt data to load
-                LOGGER.debug("Waiting for receipt data to load...")
-                page.wait_for_timeout(5000)  # Wait 5 seconds for data to load
-                
-                # Try to wait for specific elements that indicate receipt is loaded
-                try:
-                    # Wait for table or receipt content
-                    page.wait_for_selector('table, .receipt, .check-content, [class*="item"]', timeout=10000)
-                    LOGGER.debug("Receipt content detected")
-                except PlaywrightTimeoutError:
-                    LOGGER.debug("Receipt content timeout, but continuing...")
-            
-            # Get final HTML content
-            html_content = page.content()
-            browser.close()
-            
-            return html_content
-            
-    except Exception as e:
-        LOGGER.warning("Playwright automation failed: %s", e)
-        return None
 
