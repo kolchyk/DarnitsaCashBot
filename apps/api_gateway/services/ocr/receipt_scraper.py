@@ -1,24 +1,257 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
+import shutil
+import tempfile
 import time
 from datetime import datetime
-from typing import Any
-from urllib.parse import parse_qs, urlparse
-
+from typing import Any, Callable
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 
 LOGGER = logging.getLogger(__name__)
+
+CHROME_BINARY_CANDIDATES = [
+    os.getenv("GOOGLE_CHROME_BIN"),
+    os.getenv("CHROME_BINARY"),
+    "/app/.apt/usr/bin/chromium-browser",
+    "/app/.apt/usr/bin/google-chrome",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium-browser",
+    "/usr/bin/chromium",
+]
+
+CHROMEDRIVER_CANDIDATES = [
+    os.getenv("CHROMEDRIVER_PATH"),
+    "/app/.apt/usr/bin/chromedriver",
+    "/app/.apt/usr/lib/chromium-browser/chromedriver",
+    "/usr/bin/chromedriver",
+    "/usr/local/bin/chromedriver",
+    "/app/.chromedriver/bin/chromedriver",
+]
+
+CHROME_WINDOW_SIZE = "1920,1080"
+HEADLESS_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+MAX_DRIVER_START_ATTEMPTS = 3
+_AUTO_DOWNLOAD_FLAG = os.getenv("ENABLE_CHROMEDRIVER_AUTO_DOWNLOAD", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 
 class ScrapingError(Exception):
     """Raised when scraping fails."""
+
+
+def _resolve_chrome_binary() -> str | None:
+    """Return absolute path to Chrome/Chromium binary if available."""
+    for candidate in CHROME_BINARY_CANDIDATES:
+        if candidate and os.path.exists(candidate):
+            LOGGER.info("Using Chrome/Chromium binary at: %s", candidate)
+            return candidate
+    LOGGER.warning("Chrome binary not found in predefined locations, relying on system default")
+    return None
+
+
+def _resolve_chromedriver_path() -> tuple[str | None, str]:
+    """
+    Return path to chromedriver and a description of its origin.
+    
+    Order of preference:
+    1. Pre-installed binary from Aptfile / env var
+    2. chromedriver available on PATH
+    3. chromedriver-autoinstaller (guarded by ENABLE_CHROMEDRIVER_AUTO_DOWNLOAD)
+    4. webdriver-manager (also guarded by the same flag for local dev)
+    """
+    for candidate in CHROMEDRIVER_CANDIDATES:
+        if candidate and os.path.exists(candidate):
+            return candidate, "preinstalled"
+    
+    chromedriver_in_path = shutil.which("chromedriver")
+    if chromedriver_in_path:
+        return chromedriver_in_path, "PATH"
+    
+    if _AUTO_DOWNLOAD_FLAG:
+        try:
+            import chromedriver_autoinstaller
+            installed_path = chromedriver_autoinstaller.install()
+            if installed_path and os.path.exists(installed_path):
+                return installed_path, "chromedriver-autoinstaller"
+        except Exception as exc:
+            LOGGER.warning("chromedriver-autoinstaller failed: %s", exc)
+        
+        try:
+            from webdriver_manager.chrome import ChromeDriverManager
+            installed_path = ChromeDriverManager().install()
+            if installed_path and os.path.exists(installed_path):
+                return installed_path, "webdriver-manager"
+        except Exception as exc:
+            LOGGER.warning("webdriver-manager failed to download chromedriver: %s", exc)
+    else:
+        LOGGER.info(
+            "Chromedriver auto-download is disabled. "
+            "Set ENABLE_CHROMEDRIVER_AUTO_DOWNLOAD=1 to allow downloads for local development."
+        )
+    
+    return None, "unavailable"
+
+
+def _create_chromedriver_service() -> Service | None:
+    """Create a Selenium Service backed by the resolved chromedriver path."""
+    driver_path, source = _resolve_chromedriver_path()
+    if not driver_path:
+        LOGGER.warning(
+            "Chromedriver binary was not found (source=%s). Selenium will rely on system defaults.",
+            source,
+        )
+        return None
+    
+    LOGGER.info("Using chromedriver from %s at: %s", source, driver_path)
+    return Service(driver_path)
+
+
+def _create_temp_user_data_dir() -> str:
+    """Allocate an isolated Chrome profile directory."""
+    preferred_parent = os.getenv("CHROME_USER_DATA_PARENT", "/tmp")
+    try:
+        os.makedirs(preferred_parent, exist_ok=True)
+        return tempfile.mkdtemp(prefix="chrome_profile_", dir=preferred_parent)
+    except Exception as exc:  # pragma: no cover - fallback path
+        LOGGER.warning(
+            "Failed to create Chrome user-data directory under %s (%s), falling back to system temp",
+            preferred_parent,
+            exc,
+        )
+        return tempfile.mkdtemp(prefix="chrome_profile_")
+
+
+def _cleanup_user_data_dir(path: str | None) -> None:
+    """Best-effort cleanup of the temporary Chrome profile directory."""
+    if not path:
+        return
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def _build_chrome_options(*, user_data_dir: str, headless: bool = True) -> webdriver.ChromeOptions:
+    """Construct Chrome options tuned for Heroku/container environments."""
+    options = webdriver.ChromeOptions()
+    
+    if headless:
+        options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--remote-debugging-port=0")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-background-networking")
+    options.add_argument("--disable-background-timer-throttling")
+    options.add_argument("--disable-backgrounding-occluded-windows")
+    options.add_argument("--disable-breakpad")
+    options.add_argument("--disable-client-side-phishing-detection")
+    options.add_argument("--disable-default-apps")
+    options.add_argument("--disable-hang-monitor")
+    options.add_argument("--disable-popup-blocking")
+    options.add_argument("--disable-prompt-on-repost")
+    options.add_argument("--disable-sync")
+    options.add_argument("--disable-translate")
+    options.add_argument("--disable-infobars")
+    options.add_argument("--disable-setuid-sandbox")
+    options.add_argument("--disable-features=VizDisplayCompositor")
+    options.add_argument("--metrics-recording-only")
+    options.add_argument("--no-first-run")
+    options.add_argument("--safebrowsing-disable-auto-update")
+    options.add_argument("--password-store=basic")
+    options.add_argument("--use-mock-keychain")
+    options.add_argument("--single-process")
+    options.add_argument("--no-zygote")
+    options.add_argument("--ignore-certificate-errors")
+    options.add_argument(f"--window-size={CHROME_WINDOW_SIZE}")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+    
+    user_agent = os.getenv("SCRAPER_USER_AGENT", HEADLESS_USER_AGENT)
+    options.add_argument(f"--user-agent={user_agent}")
+    
+    options.add_argument(f"--user-data-dir={user_data_dir}")
+    options.add_argument(f"--data-path={os.path.join(user_data_dir, 'data-path')}")
+    options.add_argument(f"--disk-cache-dir={os.path.join(user_data_dir, 'cache')}")
+    
+    chrome_binary = _resolve_chrome_binary()
+    if chrome_binary:
+        options.binary_location = chrome_binary
+    
+    return options
+
+
+def _start_chrome_driver(*, user_data_dir: str, headless: bool = True) -> webdriver.Chrome:
+    """Start Chrome with retries using the configured options."""
+    options = _build_chrome_options(user_data_dir=user_data_dir, headless=headless)
+    service = _create_chromedriver_service()
+    last_error: Exception | None = None
+    width, height = [int(value) for value in CHROME_WINDOW_SIZE.split(",")]
+    
+    for attempt in range(1, MAX_DRIVER_START_ATTEMPTS + 1):
+        try:
+            driver = (
+                webdriver.Chrome(service=service, options=options)
+                if service
+                else webdriver.Chrome(options=options)
+            )
+            driver.set_window_size(width, height)
+            LOGGER.info("Started headless Chrome on attempt %d", attempt)
+            return driver
+        except WebDriverException as exc:
+            last_error = exc
+            LOGGER.error(
+                "Chrome start attempt %d/%d failed: %s",
+                attempt,
+                MAX_DRIVER_START_ATTEMPTS,
+                exc,
+            )
+            time.sleep(min(4, attempt * 2))
+    
+    raise ScrapingError(f"Failed to start headless Chrome: {last_error}") from last_error
+
+
+def build_receipt_scraper_driver(headless: bool = True) -> tuple[webdriver.Chrome, Callable[[], None]]:
+    """
+    Create a Selenium driver configured with the scraper defaults.
+    
+    Returns a tuple of (driver, cleanup_callback). Always call the cleanup
+    callback to close Chrome and remove temporary profile data.
+    """
+    user_data_dir = _create_temp_user_data_dir()
+    driver = None
+    try:
+        driver = _start_chrome_driver(user_data_dir=user_data_dir, headless=headless)
+    except Exception:
+        _cleanup_user_data_dir(user_data_dir)
+        raise
+    
+    def _cleanup() -> None:
+        try:
+            if driver:
+                driver.quit()
+        except Exception:
+            LOGGER.debug("Failed to close Chrome cleanly", exc_info=True)
+        finally:
+            _cleanup_user_data_dir(user_data_dir)
+    
+    return driver, _cleanup
 
 
 def parse_receipt_text(check_text: str) -> dict[str, Any]:
@@ -618,111 +851,11 @@ def scrape_receipt_data_via_selenium(url: str) -> dict[str, Any]:
     """
     
     driver = None
+    cleanup: Callable[[], None] | None = None
     try:
         LOGGER.info("Starting Selenium browser for receipt scraping: url=%s", url)
         
-        # Setup Chrome options
-        options = webdriver.ChromeOptions()
-        # Use headless mode for production
-        options.add_argument('--headless')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--user-data-dir=/tmp/chrome_data')  # Critical for Heroku - prevents Chrome from accessing user profile directories
-        options.add_argument('--disable-blink-features=AutomationControlled')
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option('useAutomationExtension', False)
-        options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-        
-        # Additional options for Heroku/containerized environments
-        options.add_argument('--disable-gpu')
-        options.add_argument('--disable-software-rasterizer')
-        options.add_argument('--disable-extensions')
-        options.add_argument('--disable-background-networking')
-        options.add_argument('--disable-background-timer-throttling')
-        options.add_argument('--disable-backgrounding-occluded-windows')
-        options.add_argument('--disable-breakpad')
-        options.add_argument('--disable-client-side-phishing-detection')
-        options.add_argument('--disable-default-apps')
-        options.add_argument('--disable-hang-monitor')
-        options.add_argument('--disable-popup-blocking')
-        options.add_argument('--disable-prompt-on-repost')
-        options.add_argument('--disable-sync')
-        options.add_argument('--disable-translate')
-        options.add_argument('--metrics-recording-only')
-        options.add_argument('--no-first-run')
-        options.add_argument('--safebrowsing-disable-auto-update')
-        options.add_argument('--enable-automation')
-        options.add_argument('--password-store=basic')
-        options.add_argument('--use-mock-keychain')
-        # Additional options for Heroku dyno constraints
-        options.add_argument('--disable-setuid-sandbox')  # Required for Heroku
-        options.add_argument('--disable-features=VizDisplayCompositor')  # Disable display compositor
-        options.add_argument('--window-size=1920,1080')  # Set window size
-        options.add_argument('--disable-infobars')  # Disable info bars
-        
-        # Set Chrome/Chromium binary path for Heroku (if available)
-        import os
-        import shutil
-        
-        # Try multiple possible binary paths (Chrome, Chromium, or custom env var)
-        chrome_binary = os.environ.get('GOOGLE_CHROME_BIN') or None
-        if not chrome_binary:
-            # Try Chrome first, then Chromium (including Heroku Aptfile installation path)
-            for binary_path in [
-                '/app/.apt/usr/bin/chromium-browser',  # Heroku Aptfile installation path
-                '/usr/bin/google-chrome-stable',
-                '/usr/bin/chromium-browser',
-                '/usr/bin/chromium'
-            ]:
-                if os.path.exists(binary_path):
-                    chrome_binary = binary_path
-                    LOGGER.info("Found Chrome binary at: %s", chrome_binary)
-                    break
-        
-        if chrome_binary and os.path.exists(chrome_binary):
-            options.binary_location = chrome_binary
-        else:
-            LOGGER.warning("Chrome binary not found, using system default")
-        
-        # Configure ChromeDriver service for Heroku
-        chrome_driver_path = os.environ.get('CHROMEDRIVER_PATH') or None
-        if not chrome_driver_path:
-            # Try common ChromeDriver locations
-            for driver_path in ['/usr/bin/chromedriver', '/usr/local/bin/chromedriver', '/app/.chromedriver/bin/chromedriver']:
-                if os.path.exists(driver_path):
-                    chrome_driver_path = driver_path
-                    LOGGER.info("Found ChromeDriver at: %s", chrome_driver_path)
-                    break
-        
-        # Use Service if ChromeDriver path is found, otherwise let Selenium manage it
-        service = None
-        if chrome_driver_path and os.path.exists(chrome_driver_path):
-            service = Service(chrome_driver_path)
-            LOGGER.info("Using ChromeDriver service at: %s", chrome_driver_path)
-        else:
-            # Try to find chromedriver in PATH
-            chromedriver_in_path = shutil.which('chromedriver')
-            if chromedriver_in_path:
-                service = Service(chromedriver_in_path)
-                LOGGER.info("Using ChromeDriver from PATH: %s", chromedriver_in_path)
-            else:
-                # Fallback to webdriver-manager if available
-                try:
-                    from webdriver_manager.chrome import ChromeDriverManager
-                    driver_path = ChromeDriverManager().install()
-                    service = Service(driver_path)
-                    LOGGER.info("Using ChromeDriver from webdriver-manager: %s", driver_path)
-                except ImportError:
-                    LOGGER.warning("ChromeDriver not found and webdriver-manager not available, Selenium will attempt to use system default")
-                except Exception as e:
-                    LOGGER.warning("Failed to install ChromeDriver via webdriver-manager: %s, Selenium will attempt to use system default", e)
-        
-        # Create driver with service if available
-        if service:
-            driver = webdriver.Chrome(service=service, options=options)
-        else:
-            driver = webdriver.Chrome(options=options)
-        driver.set_window_size(1920, 1080)
+        driver, cleanup = build_receipt_scraper_driver(headless=True)
         
         LOGGER.debug("Loading page: %s", url)
         driver.get(url)
@@ -846,8 +979,10 @@ def scrape_receipt_data_via_selenium(url: str) -> dict[str, Any]:
         LOGGER.error(error_msg, exc_info=True)
         raise ScrapingError(error_msg) from e
     finally:
-        if driver:
+        if cleanup:
+            cleanup()
+        elif driver:
             try:
                 driver.quit()
-            except:
+            except Exception:
                 pass

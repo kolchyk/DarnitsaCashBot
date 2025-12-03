@@ -59,5 +59,10 @@ make migrate   # Alembic upgrade
 
 ## Deployment
 
-Heroku with `heroku-buildpack-apt` for libzbar0
+**Platform**: Heroku
+
+- Uses `heroku-buildpack-apt` for system dependencies (libzbar0)
+- Ensure all Heroku-specific configurations are maintained
+- Check `Aptfile` for required system packages
+- Environment variables must be set in Heroku config vars
 

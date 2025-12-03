@@ -8,15 +8,15 @@ from __future__ import annotations
 import sys
 import json
 import logging
+import tempfile
 import time
 from pathlib import Path
 from datetime import datetime
 
-from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import TimeoutException
 
 # Настройка логирования
 logging.basicConfig(
@@ -28,8 +28,19 @@ logging.basicConfig(
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from apps.api_gateway.services.ocr.receipt_scraper import (  # noqa: E402
+    build_receipt_scraper_driver,
+    parse_receipt_text,
+)
 
-def test_parse_page(url: str, save_html: bool = True, api_token: str | None = None) -> None:
+
+def test_parse_page(
+    url: str,
+    save_html: bool = True,
+    api_token: str | None = None,
+    *,
+    headless: bool = True,
+) -> None:
     """
     Тестирует парсинг страницы чека с tax.gov.ua через браузерную автоматизацию
     
@@ -37,9 +48,8 @@ def test_parse_page(url: str, save_html: bool = True, api_token: str | None = No
         url: URL страницы чека
         save_html: Сохранять ли HTML для отладки
         api_token: API токен для tax.gov.ua (не используется, оставлен для совместимости)
+        headless: Использовать ли headless Chrome (по умолчанию да, как в проде)
     """
-    from apps.api_gateway.services.ocr.receipt_scraper import parse_receipt_text
-    
     print("=" * 80)
     print("ТЕСТ ПАРСИНГА СТРАНИЦЫ ЧЕКА")
     print("=" * 80)
@@ -48,20 +58,11 @@ def test_parse_page(url: str, save_html: bool = True, api_token: str | None = No
     print("-" * 80)
     
     driver = None
+    cleanup = None
     try:
         print("\n🚀 Запускаем браузер...")
-        # Используем Chrome
-        options = webdriver.ChromeOptions()
-        # Раскомментируйте следующую строку для headless режима
-        # options.add_argument('--headless')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('--disable-blink-features=AutomationControlled')
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option('useAutomationExtension', False)
-        
-        driver = webdriver.Chrome(options=options)
-        driver.set_window_size(1920, 1080)
+        driver, cleanup = build_receipt_scraper_driver(headless=headless)
+        print(f"⚙️  Chrome запущен в {'headless' if headless else 'headed'} режиме с боевыми настройками")
         
         print(f"📄 Загружаем страницу: {url}")
         driver.get(url)
@@ -305,9 +306,55 @@ def test_parse_page(url: str, save_html: bool = True, api_token: str | None = No
         traceback.print_exc()
         return None
     finally:
-        if driver:
+        if cleanup:
+            print("\n🔒 Закрываем браузер и чистим профили...")
+            cleanup()
+        elif driver:
             print("\n🔒 Закрываем браузер...")
             driver.quit()
+
+
+def run_smoke_test() -> bool:
+    """
+    Быстрый smoke-тест: запускает Chrome с боевыми настройками и открывает локальную HTML-страницу.
+    """
+    html_template = """<!DOCTYPE html>
+<html lang="uk">
+<head><meta charset="utf-8"><title>Smoke Test</title></head>
+<body>
+  <h1>Smoke Test</h1>
+  <button type="submit">Пошук</button>
+  <pre>
+ТОВ "АПТЕКА"
+СУМА ДО СПЛАТИ: 100.00 ГРН
+  </pre>
+</body>
+</html>
+"""
+    tmp_path = None
+    driver = None
+    cleanup = None
+    try:
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".html", encoding="utf-8") as tmp_file:
+            tmp_file.write(html_template)
+            tmp_path = Path(tmp_file.name)
+        
+        print("\n🧪 Запускаем headless smoke-тест Selenium...")
+        driver, cleanup = build_receipt_scraper_driver(headless=True)
+        driver.get(tmp_path.as_uri())
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "pre")))
+        print("✅ Smoke-тест успешно открыл локальную страницу и нашёл контент")
+        return True
+    except Exception as exc:  # pragma: no cover - utility script
+        logging.exception("Smoke-тест Selenium не прошел: %s", exc)
+        return False
+    finally:
+        if cleanup:
+            cleanup()
+        elif driver:
+            driver.quit()
+        if tmp_path and tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
 
 
 def main() -> None:
@@ -332,10 +379,29 @@ def main() -> None:
         action="store_true",
         help="Сохранять HTML для отладки (не используется)"
     )
+    parser.add_argument(
+        "--headed",
+        action="store_true",
+        help="Запустить Chrome в обычном режиме (по умолчанию headless)"
+    )
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Выполнить только быстрый smoke-тест Selenium"
+    )
     
     args = parser.parse_args()
     
-    result = test_parse_page(args.url, save_html=args.save_html, api_token=args.token)
+    if args.smoke:
+        success = run_smoke_test()
+        sys.exit(0 if success else 1)
+    
+    result = test_parse_page(
+        args.url,
+        save_html=args.save_html,
+        api_token=args.token,
+        headless=not args.headed,
+    )
     
     print("\n" + "=" * 80)
     if result:
