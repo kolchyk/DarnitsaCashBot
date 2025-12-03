@@ -55,6 +55,11 @@ async def process_message(payload: dict) -> None:
             
             LOGGER.info("QR code detected for receipt %s: url=%s", receipt_id, qr_url)
             
+            # Send intermediate notification to user that QR code was recognized
+            telegram_id = receipt.user.telegram_id if receipt.user else None
+            if telegram_id:
+                await _notify_qr_recognized(telegram_id, receipt_id, qr_url)
+            
             # Step 2: Try to scrape receipt data from URL
             LOGGER.debug("Starting receipt scraping for receipt %s", receipt_id)
             scraped_data = None
@@ -205,6 +210,42 @@ async def process_message(payload: dict) -> None:
 async def _publish_failure(payload: dict, failure_payload: dict) -> None:
     # RabbitMQ removed - failures are now stored in database only
     pass
+
+
+async def _notify_qr_recognized(telegram_id: int, receipt_id: UUID, qr_url: str) -> None:
+    """Send notification to user that QR code was successfully recognized."""
+    LOGGER.info("Attempting to send QR recognition notification to user %s for receipt %s", telegram_id, receipt_id)
+    
+    settings = get_settings()
+    from apps.api_gateway.services.telegram_notifier import TelegramNotifier
+    
+    notifier = TelegramNotifier(settings)
+    try:
+        # Build message with QR URL as clickable link
+        message = (
+            "✅ <b>QR код розпізнано!</b>\n\n"
+            "Ваш чек успішно розпізнано. Обробляємо дані...\n\n"
+        )
+        
+        # Add link to the QR URL if it's a valid URL
+        if qr_url.startswith(("http://", "https://")):
+            message += f"🔗 <a href=\"{qr_url}\">Переглянути чек на сайті</a>"
+        
+        success = await notifier.send_message(telegram_id, message)
+        if success:
+            LOGGER.info("Successfully sent QR recognition notification to user %s for receipt %s", telegram_id, receipt_id)
+        else:
+            LOGGER.warning("Failed to send QR recognition notification to user %s for receipt %s", telegram_id, receipt_id)
+    except Exception as e:
+        LOGGER.error(
+            "Exception while sending QR recognition notification to user %s for receipt %s: %s",
+            telegram_id,
+            receipt_id,
+            e,
+            exc_info=True,
+        )
+    finally:
+        await notifier.close()
 
 
 async def _notify_receipt_error(telegram_id: int, receipt_id: UUID, error_type: str) -> None:
