@@ -8,8 +8,15 @@ from __future__ import annotations
 import sys
 import json
 import logging
+import time
 from pathlib import Path
 from datetime import datetime
+
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 # Настройка логирования
 logging.basicConfig(
@@ -31,17 +38,6 @@ def test_parse_page(url: str, save_html: bool = True, api_token: str | None = No
         save_html: Сохранять ли HTML для отладки
         api_token: API токен для tax.gov.ua (не используется, оставлен для совместимости)
     """
-    try:
-        from selenium import webdriver
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        from selenium.common.exceptions import TimeoutException, NoSuchElementException
-    except ImportError:
-        print("\n❌ Библиотека Selenium не установлена!")
-        print("   Установите: pip install selenium")
-        return None
-    
     from apps.api_gateway.services.ocr.receipt_scraper import parse_receipt_text
     
     print("=" * 80)
@@ -76,7 +72,6 @@ def test_parse_page(url: str, save_html: bool = True, api_token: str | None = No
         )
         
         # Дополнительная задержка для полной загрузки
-        import time
         time.sleep(2)
         
         # Ищем кнопку "Пошук"

@@ -2,9 +2,16 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 LOGGER = logging.getLogger(__name__)
 
@@ -608,16 +615,6 @@ def scrape_receipt_data_via_selenium(url: str) -> dict[str, Any]:
     Raises:
         ScrapingError: If scraping fails
     """
-    try:
-        from selenium import webdriver
-        from selenium.webdriver.common.by import By
-        from selenium.webdriver.support.ui import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        from selenium.common.exceptions import TimeoutException, NoSuchElementException
-    except ImportError:
-        raise ScrapingError("Selenium is not installed. Install with: pip install selenium")
-    
-    import time
     
     driver = None
     try:
