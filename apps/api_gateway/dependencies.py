@@ -11,7 +11,7 @@ from libs.common.storage import StorageClient
 from libs.common.rate_limit import RateLimiter
 from libs.data.database import get_async_session
 
-from ..services.turbosms import TurboSmsClient
+from .services.turbosms import TurboSmsClient
 
 
 async def get_settings_dep() -> AppSettings:
