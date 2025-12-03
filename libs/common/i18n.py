@@ -19,18 +19,18 @@ def get_translator(locale: str):
 
 
 def translate_status(status: str) -> str:
-    """Translate receipt status to Ukrainian."""
+    """Translate receipt status to Ukrainian with emojis."""
     if not status or status == "-":
         return status
     
     status_map = {
-        "pending": "очікує",
-        "processing": "обробляється",
-        "accepted": "прийнято",
-        "rejected": "відхилено",
-        "payout_pending": "очікує виплати",
-        "payout_success": "виплачено",
-        "payout_failed": "помилка виплати",
+        "pending": "⏳ очікує обробки",
+        "processing": "🔄 обробляється",
+        "accepted": "✅ прийнято",
+        "rejected": "❌ відхилено",
+        "payout_pending": "💳 очікує виплати",
+        "payout_success": "💰 виплачено",
+        "payout_failed": "⚠️ помилка виплати",
     }
     
     return status_map.get(status, status)
