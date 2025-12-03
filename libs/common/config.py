@@ -64,6 +64,9 @@ class AppSettings(BaseSettings):
     ocr_artifact_ttl_days: int = Field(default=90, alias="OCR_ARTIFACT_TTL_DAYS")
     ocr_save_preprocessed: bool = Field(default=True, alias="OCR_SAVE_PREPROCESSED")
     ocr_vendor_fallback_enabled: bool = Field(default=False, alias="OCR_VENDOR_FALLBACK_ENABLED")
+    
+    # Tax.gov.ua API configuration
+    tax_gov_ua_api_token: str | None = Field(default=None, alias="TAX_GOV_UA_API_TOKEN")
 
     @property
     def database_url(self) -> str:

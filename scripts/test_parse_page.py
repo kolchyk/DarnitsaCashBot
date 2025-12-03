@@ -26,9 +26,12 @@ def test_parse_page(url: str, save_html: bool = True) -> None:
     """
     Тестирует парсинг страницы чека с tax.gov.ua
     
+    NOTE: Функционал скраппинга Playwright был удален.
+    Этот скрипт теперь показывает сообщение об ошибке.
+    
     Args:
         url: URL страницы чека
-        save_html: Сохранять ли HTML для отладки
+        save_html: Сохранять ли HTML для отладки (не используется)
     """
     from apps.api_gateway.services.ocr.receipt_scraper import scrape_receipt_data, ScrapingError
     
@@ -41,6 +44,7 @@ def test_parse_page(url: str, save_html: bool = True) -> None:
     
     try:
         print("\n🚀 Начинаем парсинг...")
+        print("⚠️  ВНИМАНИЕ: Функционал скраппинга Playwright был удален!")
         result = scrape_receipt_data(url)
         
         print("\n" + "=" * 80)

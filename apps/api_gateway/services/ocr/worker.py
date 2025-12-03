@@ -16,7 +16,7 @@ from libs.data.models import Receipt, ReceiptStatus
 from sqlalchemy import select
 
 from .qr_scanner import QRCodeNotFoundError, detect_qr_code
-from .receipt_scraper import ScrapingError, scrape_receipt_data
+from .tax_api_client import TaxApiError, fetch_receipt_data, parse_receipt_url
 
 LOGGER = logging.getLogger(__name__)
 
@@ -60,34 +60,93 @@ async def process_message(payload: dict) -> None:
             if telegram_id:
                 await _notify_qr_recognized(telegram_id, receipt_id, qr_url)
             
-            # Step 2: Try to scrape receipt data from URL
-            LOGGER.debug("Starting receipt scraping for receipt %s", receipt_id)
-            scraped_data = None
-            try:
-                scraped_data = await asyncio.to_thread(scrape_receipt_data, qr_url)
-                items_count = len(scraped_data.get("line_items", []))
-                LOGGER.info(
-                    "Scraping completed for receipt %s: merchant=%s, line_items=%d, total=%s",
-                    receipt_id,
-                    scraped_data.get("merchant"),
-                    items_count,
-                    scraped_data.get("total"),
-                )
-                
-                # If scraping didn't find items, reject receipt
-                if items_count == 0:
-                    LOGGER.warning(
-                        "Scraping found 0 items for receipt %s, rejecting",
+            # Step 2: Parse URL and fetch receipt data from tax.gov.ua API
+            scraped_data = {
+                "merchant": None,
+                "purchase_ts": None,
+                "total": None,
+                "line_items": [],
+                "confidence": {
+                    "mean": 0.0,
+                    "min": 0.0,
+                    "max": 0.0,
+                    "token_count": 0,
+                    "auto_accept_candidate": False,
+                },
+                "manual_review_required": True,
+                "anomalies": [],
+            }
+            
+            # Try to fetch data from tax.gov.ua API if URL is valid and token is configured
+            if qr_url and qr_url.startswith(("http://", "https://")) and settings.tax_gov_ua_api_token:
+                try:
+                    # Parse URL to extract parameters
+                    url_params = parse_receipt_url(qr_url)
+                    receipt_api_id = url_params.get("id")
+                    
+                    if receipt_api_id:
+                        LOGGER.info(
+                            "Fetching receipt data from tax.gov.ua API for receipt %s: id=%s, date=%s, fn=%s",
+                            receipt_id,
+                            receipt_api_id,
+                            url_params.get("date"),
+                            url_params.get("fn"),
+                        )
+                        
+                        # Fetch receipt data from API
+                        api_response = await fetch_receipt_data(
+                            receipt_id=receipt_api_id,
+                            token=settings.tax_gov_ua_api_token,
+                            date=url_params.get("date"),
+                            fn=url_params.get("fn"),
+                            receipt_type=3,  # Text document for display (UTF-8)
+                        )
+                        
+                        LOGGER.info(
+                            "Received API response for receipt %s: fn=%s, xml=%s, sign=%s, check_length=%d",
+                            receipt_id,
+                            api_response.get("fn"),
+                            api_response.get("xml"),
+                            api_response.get("sign"),
+                            len(api_response.get("check", "")),
+                        )
+                        
+                        # Store API response in scraped_data for further processing
+                        scraped_data["tax_api_response"] = api_response
+                        scraped_data["anomalies"] = []
+                        
+                        # Extract merchant name if available
+                        if api_response.get("name"):
+                            scraped_data["merchant"] = api_response["name"]
+                        
+                        # Extract date if available
+                        if url_params.get("date"):
+                            try:
+                                scraped_data["purchase_ts"] = url_params["date"]
+                            except Exception as e:
+                                LOGGER.warning("Failed to parse purchase date: %s", e)
+                        
+                    else:
+                        LOGGER.warning("Could not extract receipt ID from URL: %s", qr_url)
+                        scraped_data["anomalies"].append("Could not extract receipt ID from QR URL")
+                        
+                except TaxApiError as e:
+                    LOGGER.warning("Failed to fetch receipt data from tax.gov.ua API for receipt %s: %s", receipt_id, e)
+                    scraped_data["anomalies"].append(f"Tax.gov.ua API error: {str(e)}")
+                except Exception as e:
+                    LOGGER.error(
+                        "Unexpected error while fetching receipt data from tax.gov.ua API for receipt %s: %s",
                         receipt_id,
+                        e,
+                        exc_info=True,
                     )
-                    raise ScrapingError("No items found in receipt")
-            except ScrapingError as exc:
-                LOGGER.error(
-                    "Scraping failed for receipt %s: %s",
-                    receipt_id,
-                    exc,
-                )
-                raise
+                    scraped_data["anomalies"].append(f"Unexpected error fetching receipt data: {str(e)}")
+            elif not settings.tax_gov_ua_api_token:
+                LOGGER.debug("Tax.gov.ua API token not configured, skipping API request for receipt %s", receipt_id)
+                scraped_data["anomalies"].append("Tax.gov.ua API token not configured")
+            else:
+                LOGGER.warning("Invalid QR URL format for receipt %s: %s", receipt_id, qr_url)
+                scraped_data["anomalies"].append("Invalid QR URL format")
             
         except QRCodeNotFoundError as exc:
             LOGGER.warning("QR code not found for receipt %s: %s", receipt_id, exc, exc_info=True)
@@ -100,20 +159,6 @@ async def process_message(payload: dict) -> None:
             await _publish_failure(payload, failure_payload)
             if telegram_id:
                 await _notify_receipt_error(telegram_id, receipt_id, "qr_code_not_found")
-            else:
-                LOGGER.warning("Cannot send error notification: receipt %s has no user or telegram_id", receipt_id)
-            return
-        except ScrapingError as exc:
-            LOGGER.error("Scraping failed for receipt %s: %s", receipt_id, exc, exc_info=True)
-            # Get telegram_id before commit to ensure user is loaded
-            telegram_id = receipt.user.telegram_id if receipt.user else None
-            receipt.status = ReceiptStatus.REJECTED
-            failure_payload = {"error": str(exc), "type": "scraping_error"}
-            receipt.ocr_payload = failure_payload
-            await session.commit()
-            await _publish_failure(payload, failure_payload)
-            if telegram_id:
-                await _notify_receipt_error(telegram_id, receipt_id, "scraping_error")
             else:
                 LOGGER.warning("Cannot send error notification: receipt %s has no user or telegram_id", receipt_id)
             return
