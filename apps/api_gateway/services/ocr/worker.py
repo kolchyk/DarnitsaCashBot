@@ -126,6 +126,10 @@ async def process_message(payload: dict) -> None:
                             except Exception as e:
                                 LOGGER.warning("Failed to parse purchase date: %s", e)
                         
+                        # Send API response to user
+                        if telegram_id:
+                            await _notify_api_response(telegram_id, receipt_id, api_response)
+                        
                     else:
                         LOGGER.warning("Could not extract receipt ID from URL: %s", qr_url)
                         scraped_data["anomalies"].append("Could not extract receipt ID from QR URL")
@@ -284,6 +288,94 @@ async def _notify_qr_recognized(telegram_id: int, receipt_id: UUID, qr_url: str)
     except Exception as e:
         LOGGER.error(
             "Exception while sending QR recognition notification to user %s for receipt %s: %s",
+            telegram_id,
+            receipt_id,
+            e,
+            exc_info=True,
+        )
+    finally:
+        await notifier.close()
+
+
+async def _notify_api_response(telegram_id: int, receipt_id: UUID, api_response: dict[str, Any]) -> None:
+    """Send API response from tax.gov.ua to user via Telegram."""
+    LOGGER.info("Attempting to send API response to user %s for receipt %s", telegram_id, receipt_id)
+    
+    settings = get_settings()
+    from apps.api_gateway.services.telegram_notifier import TelegramNotifier
+    
+    notifier = TelegramNotifier(settings)
+    try:
+        # Build message with API response data
+        message_parts = ["✅ <b>Дані чека отримано з реєстру фіскальних чеків</b>\n\n"]
+        
+        # Add fiscal number if available
+        fn_value = api_response.get("fn")
+        if fn_value:
+            message_parts.append(f"📋 <b>Фіскальний номер РРО:</b> {fn_value}\n\n")
+        
+        # Add receipt ID if available
+        receipt_api_id = api_response.get("id")
+        if receipt_api_id:
+            message_parts.append(f"🆔 <b>Номер чека:</b> {receipt_api_id}\n\n")
+        
+        # Add merchant name if available
+        merchant_name = api_response.get("name")
+        if merchant_name:
+            message_parts.append(f"🏪 <b>Торговельна точка:</b> {merchant_name}\n\n")
+        
+        # Add check data (text receipt) if available
+        check_data = api_response.get("check")
+        if check_data and isinstance(check_data, str):
+            message_parts.append("📄 <b>Дані чека:</b>\n")
+            message_parts.append("<pre>")
+            # Calculate available space (Telegram limit is 4096 characters, reserve ~500 for other content)
+            available_space = 3500
+            # Count current message length
+            current_length = len("".join(message_parts))
+            remaining_space = available_space - current_length
+            
+            if remaining_space > 100:
+                check_preview = check_data[:remaining_space - 50] if len(check_data) > remaining_space - 50 else check_data
+                message_parts.append(check_preview)
+                if len(check_data) > remaining_space - 50:
+                    message_parts.append("\n\n... (текст обрізано через обмеження Telegram)")
+            else:
+                message_parts.append("(текст чека занадто великий для відображення)")
+            
+            message_parts.append("</pre>\n\n")
+        
+        # Add XML availability info
+        xml_value = api_response.get("xml")
+        if xml_value:
+            if isinstance(xml_value, bool) and xml_value:
+                message_parts.append("✅ XML дані доступні\n\n")
+            elif isinstance(xml_value, str) and xml_value:
+                message_parts.append("✅ XML дані доступні\n\n")
+        
+        # Add signature info
+        sign_value = api_response.get("sign")
+        if sign_value:
+            if isinstance(sign_value, bool) and sign_value:
+                message_parts.append("✅ Чек підписано КЕП\n\n")
+            elif isinstance(sign_value, str) and sign_value:
+                message_parts.append("✅ Чек підписано КЕП\n\n")
+        
+        message = "".join(message_parts)
+        
+        # Ensure message doesn't exceed Telegram limit
+        if len(message) > 4096:
+            # Truncate message and add note
+            message = message[:4000] + "\n\n... (повідомлення обрізано)"
+        
+        success = await notifier.send_message(telegram_id, message)
+        if success:
+            LOGGER.info("Successfully sent API response to user %s for receipt %s", telegram_id, receipt_id)
+        else:
+            LOGGER.warning("Failed to send API response to user %s for receipt %s", telegram_id, receipt_id)
+    except Exception as e:
+        LOGGER.error(
+            "Exception while sending API response to user %s for receipt %s: %s",
             telegram_id,
             receipt_id,
             e,

@@ -118,7 +118,7 @@ async def fetch_receipt_data(
     LOGGER.info(
         "Requesting receipt data from tax.gov.ua API:\n"
         "  Request URL: %s\n"
-        "  Method: POST\n"
+        "  Method: GET\n"
         "  Payload: id=%s, date=%s, fn=%s, type=%d, token=%s",
         api_url,
         receipt_id,
@@ -131,7 +131,8 @@ async def fetch_receipt_data(
     start_time = time.time()
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(api_url, json=payload)
+            # Use GET method with query parameters as per API documentation
+            response = await client.get(api_url, params=payload)
             elapsed_time = time.time() - start_time
             
             # Log response details before raising for status
