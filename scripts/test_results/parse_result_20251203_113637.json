@@ -1,0 +1,111 @@
+{
+  "merchant": "ТОВ \"ПЕРША ФАРМАЦІЯ КИЄВА\"",
+  "purchase_ts": null,
+  "total": 53356069066756,
+  "line_items": [
+    {
+      "name": "АРТ.№ 2009 Цитрамон-Дарниця табл. №10 Дарниця",
+      "quantity": 1,
+      "price": 1000,
+      "confidence": 0.8
+    },
+    {
+      "name": "1..50 = 36.50 В",
+      "quantity": 0,
+      "price": 3650,
+      "confidence": 0.8
+    },
+    {
+      "name": "Код УКТЗЕД: 3004",
+      "quantity": 1,
+      "price": 300400,
+      "confidence": 1.0
+    },
+    {
+      "name": "АРТ.№ 2009 Аскорбинка табл. зі смаком лимону №10(12) Киї",
+      "quantity": 1,
+      "price": 1200,
+      "confidence": 0.8
+    },
+    {
+      "name": "1..00 = 10.00 А",
+      "quantity": 0,
+      "price": 1000,
+      "confidence": 0.8
+    },
+    {
+      "name": "Код УКТЗЕД: 2106",
+      "quantity": 1,
+      "price": 210600,
+      "confidence": 1.0
+    },
+    {
+      "name": "ІНШЕ. БЕЗГОТІВКА.2: 46.50",
+      "quantity": 1,
+      "price": 4650,
+      "confidence": 1.0
+    },
+    {
+      "name": "- Еквайр: 35500671",
+      "quantity": 1,
+      "price": 3550067100,
+      "confidence": 1.0
+    },
+    {
+      "name": "- Термінал: S8516411",
+      "quantity": 1,
+      "price": 851641100,
+      "confidence": 1.0
+    },
+    {
+      "name": "- ЕПЗ: 440355909XXXXXX6",
+      "quantity": 1,
+      "price": 600,
+      "confidence": 0.8
+    },
+    {
+      "name": "- Код авторизації: 310668",
+      "quantity": 1,
+      "price": 31066800,
+      "confidence": 1.0
+    },
+    {
+      "name": "- Транзакція: 533516357589",
+      "quantity": 1,
+      "price": 53351635758900,
+      "confidence": 1.0
+    },
+    {
+      "name": "ПДВ В 7.00% 2.39",
+      "quantity": 1,
+      "price": 239,
+      "confidence": 1.0
+    },
+    {
+      "name": "ПДВ А 20.00% 1.67",
+      "quantity": 1,
+      "price": 167,
+      "confidence": 1.0
+    },
+    {
+      "name": "e02ab6a4f6b2019f262edce10dc1ef8905b58730faf6ca4744eb02fa",
+      "quantity": 1,
+      "price": 200,
+      "confidence": 0.8
+    },
+    {
+      "name": "8547a87b",
+      "quantity": 1,
+      "price": 8700,
+      "confidence": 0.8
+    },
+    {
+      "name": "01-12-2025 16:12:51",
+      "quantity": 1,
+      "price": 5100,
+      "confidence": 0.8
+    }
+  ],
+  "source": "web_scraping",
+  "html_saved": null
+}

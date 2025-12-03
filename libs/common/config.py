@@ -67,6 +67,15 @@ class AppSettings(BaseSettings):
     
     # Tax.gov.ua API configuration
     tax_gov_ua_api_token: str | None = Field(default=None, alias="TAX_GOV_UA_API_TOKEN")
+    
+    # Receipt scraping method configuration
+    receipt_scraping_method: Literal["selenium", "api", "auto"] = Field(
+        default="auto", 
+        alias="RECEIPT_SCRAPING_METHOD"
+    )
+    # "auto" means try selenium first, fallback to API if selenium fails
+    # "selenium" means use selenium only
+    # "api" means use API only (reserved as fallback)
 
     @property
     def database_url(self) -> str:
