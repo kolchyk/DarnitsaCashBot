@@ -157,19 +157,10 @@ async def check_receipt_status(telegram_id: int, receipt_id: str, receipt_client
                     "✅ Чек успішно розпізнано!\n\n"
                     "ℹ️ Не вдалося отримати список позицій з чека."
                 )
-        # If QR code processing failed (rejected), offer manual input
+        # If QR code processing failed (rejected), don't send message
         elif status == "rejected":
-            _pending_receipts[telegram_id] = receipt_id
-            await bot.send_message(
-                telegram_id,
-                "❌ Не вдалося автоматично розпізнати чек. Будь ласка, введіть дані чека вручну.\n\n"
-                "Формат введення:\n"
-                "Назва товару, кількість, ціна\n"
-                "Наприклад:\n"
-                "Дарниця Цитрамон, 1, 50.00\n"
-                "Дарниця Вітамін С, 2, 75.50\n\n"
-                "Можете ввести кілька товарів, кожен з нового рядка."
-            )
+            # Message removed per user request
+            pass
     except Exception as e:
         # If error checking status, don't bother user
         pass

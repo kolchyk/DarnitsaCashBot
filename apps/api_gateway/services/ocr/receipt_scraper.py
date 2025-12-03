@@ -134,6 +134,65 @@ async def _scrape_with_playwright(url: str) -> dict[str, Any]:
                 # Navigate to page
                 await page.goto(url, wait_until="networkidle")
                 
+                # Wait 2 seconds for page to fully load
+                await page.wait_for_timeout(2000)
+                
+                # Click the "Пошук" (Search) button if it exists
+                # The page requires clicking the search button after loading to display receipt data
+                LOGGER.debug("Looking for search button to click")
+                
+                # Try multiple possible selectors for the search button
+                # Using text content matching for Ukrainian "Пошук"
+                search_button_selectors = [
+                    # Text-based selectors (most reliable)
+                    "button:has-text('Пошук')",
+                    "button:has-text('Поиск')",
+                    "button:has-text('Search')",
+                    # Attribute-based selectors
+                    "button[type='submit']",
+                    "input[type='submit']",
+                    # Class-based selectors
+                    "button.btn-search",
+                    "button[class*='search']",
+                    "button[class*='btn'][class*='search']",
+                    # Generic button with text content check
+                    "button",
+                ]
+                
+                button_clicked = False
+                for selector in search_button_selectors:
+                    try:
+                        # Try to find button by selector
+                        buttons = await page.query_selector_all(selector)
+                        for button in buttons:
+                            # Get button text to check if it's the search button
+                            button_text = await button.text_content()
+                            button_text = button_text.strip() if button_text else ""
+                            
+                            # Check if button text contains search-related keywords
+                            search_keywords = ["пошук", "поиск", "search", "знайти", "найти"]
+                            if any(keyword.lower() in button_text.lower() for keyword in search_keywords) or (
+                                selector == "button[type='submit']" and button_text
+                            ):
+                                LOGGER.debug("Found search button with text '%s' using selector: %s", button_text, selector)
+                                # Scroll button into view if needed
+                                await button.scroll_into_view_if_needed()
+                                await button.click()
+                                button_clicked = True
+                                LOGGER.info("Clicked search button: '%s'", button_text)
+                                # Wait for the search to complete and page to update
+                                await page.wait_for_timeout(2000)
+                                break
+                        
+                        if button_clicked:
+                            break
+                    except Exception as e:
+                        LOGGER.debug("Selector %s failed: %s", selector, e)
+                        continue
+                
+                if not button_clicked:
+                    LOGGER.warning("Search button not found, proceeding without clicking. Page may not display receipt data.")
+                
                 # Wait for receipt content to load
                 # The Angular app renders into <app-root>
                 # Wait for specific content indicators
@@ -147,8 +206,8 @@ async def _scrape_with_playwright(url: str) -> dict[str, Any]:
                 except PlaywrightTimeout:
                     LOGGER.warning("Timeout waiting for content selector, proceeding anyway")
                 
-                # Additional wait for dynamic content
-                await page.wait_for_timeout(2000)
+                # Additional wait for dynamic content to ensure everything is rendered
+                await page.wait_for_timeout(1000)
                 
                 # Get rendered HTML
                 html_content = await page.content()
