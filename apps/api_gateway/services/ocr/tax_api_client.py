@@ -172,9 +172,22 @@ async def fetch_receipt_data(
             return data
     except httpx.HTTPStatusError as e:
         elapsed_time = time.time() - start_time
+        
+        # Try to parse error response as JSON
+        error_description = None
+        try:
+            if e.response.text:
+                error_json = e.response.json()
+                error_description = error_json.get("error_description") or error_json.get("error")
+        except Exception:
+            pass
+        
         error_msg = f"Tax.gov.ua API returned error status {e.response.status_code}"
-        if e.response.text:
-            error_msg += f": {e.response.text}"
+        if error_description:
+            error_msg += f": {error_description}"
+        elif e.response.text:
+            error_msg += f": {e.response.text[:200]}"
+        
         LOGGER.error(
             "Tax.gov.ua API error:\n"
             "  Request URL: %s\n"
@@ -188,7 +201,12 @@ async def fetch_receipt_data(
             error_msg,
             e.response.text[:500] if e.response.text else "No response body",
         )
-        raise TaxApiError(error_msg) from e
+        
+        # Create error with more details
+        api_error = TaxApiError(error_msg)
+        api_error.status_code = e.response.status_code
+        api_error.error_description = error_description
+        raise api_error from e
     except httpx.RequestError as e:
         elapsed_time = time.time() - start_time
         error_msg = f"Request error while calling tax.gov.ua API: {e}"

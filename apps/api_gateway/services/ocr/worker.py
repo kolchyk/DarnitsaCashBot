@@ -137,6 +137,9 @@ async def process_message(payload: dict) -> None:
                 except TaxApiError as e:
                     LOGGER.warning("Failed to fetch receipt data from tax.gov.ua API for receipt %s: %s", receipt_id, e)
                     scraped_data["anomalies"].append(f"Tax.gov.ua API error: {str(e)}")
+                    # Notify user about API error
+                    if telegram_id:
+                        await _notify_api_error(telegram_id, receipt_id, e)
                 except Exception as e:
                     LOGGER.error(
                         "Unexpected error while fetching receipt data from tax.gov.ua API for receipt %s: %s",
@@ -376,6 +379,76 @@ async def _notify_api_response(telegram_id: int, receipt_id: UUID, api_response:
     except Exception as e:
         LOGGER.error(
             "Exception while sending API response to user %s for receipt %s: %s",
+            telegram_id,
+            receipt_id,
+            e,
+            exc_info=True,
+        )
+    finally:
+        await notifier.close()
+
+
+async def _notify_api_error(telegram_id: int, receipt_id: UUID, api_error: TaxApiError) -> None:
+    """Send API error notification to user via Telegram."""
+    LOGGER.info("Attempting to send API error notification to user %s for receipt %s", telegram_id, receipt_id)
+    
+    settings = get_settings()
+    from apps.api_gateway.services.telegram_notifier import TelegramNotifier
+    
+    notifier = TelegramNotifier(settings)
+    try:
+        # Build error message
+        message_parts = ["⚠️ <b>Помилка отримання даних з реєстру фіскальних чеків</b>\n\n"]
+        
+        # Get error description if available
+        error_description = getattr(api_error, 'error_description', None) or str(api_error)
+        status_code = getattr(api_error, 'status_code', None)
+        
+        if status_code == 400:
+            # Check if it's a wartime restriction
+            if "воєнн" in error_description.lower() or "обмежено доступ" in error_description.lower():
+                message_parts.append(
+                    "На період дії воєнного стану обмежено доступ до публічних електронних реєстрів.\n\n"
+                    "💡 <b>Що це означає?</b>\n"
+                    "Чек успішно розпізнано, але отримати детальні дані з реєстру зараз неможливо через обмеження.\n\n"
+                    "✅ Ваш чек все одно буде оброблено та перевірено на наявність продуктів Дарниця."
+                )
+            else:
+                message_parts.append(
+                    f"Не вдалося отримати дані чека з реєстру.\n\n"
+                    f"<b>Деталі помилки:</b> {error_description}\n\n"
+                    f"✅ Ваш чек все одно буде оброблено та перевірено на наявність продуктів Дарниця."
+                )
+        elif status_code == 401:
+            message_parts.append(
+                "Помилка авторизації при доступі до реєстру фіскальних чеків.\n\n"
+                "✅ Ваш чек все одно буде оброблено та перевірено на наявність продуктів Дарниця."
+            )
+        elif status_code == 404:
+            message_parts.append(
+                "Чек не знайдено в реєстрі фіскальних чеків.\n\n"
+                "💡 <b>Можливі причини:</b>\n"
+                "• Чек ще не зареєстровано в системі\n"
+                "• Неправильні дані в QR коді\n\n"
+                "✅ Ваш чек все одно буде оброблено та перевірено на наявність продуктів Дарниця."
+            )
+        else:
+            message_parts.append(
+                f"Сталася помилка при отриманні даних з реєстру фіскальних чеків.\n\n"
+                f"<b>Деталі:</b> {error_description}\n\n"
+                f"✅ Ваш чек все одно буде оброблено та перевірено на наявність продуктів Дарниця."
+            )
+        
+        message = "".join(message_parts)
+        
+        success = await notifier.send_message(telegram_id, message)
+        if success:
+            LOGGER.info("Successfully sent API error notification to user %s for receipt %s", telegram_id, receipt_id)
+        else:
+            LOGGER.warning("Failed to send API error notification to user %s for receipt %s", telegram_id, receipt_id)
+    except Exception as e:
+        LOGGER.error(
+            "Exception while sending API error notification to user %s for receipt %s: %s",
             telegram_id,
             receipt_id,
             e,

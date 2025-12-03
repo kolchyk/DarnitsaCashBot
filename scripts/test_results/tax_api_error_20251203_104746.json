@@ -1,0 +1,11 @@
+{
+  "error": "Tax.gov.ua API returned error status 400: Помилка перевірки На період дії воєнного стану обмежено доступ до публічних електронних реєстрів\"",
+  "status_code": 400,
+  "error_description": "Помилка перевірки На період дії воєнного стану обмежено доступ до публічних електронних реєстрів\"",
+  "url": "https://cabinet.tax.gov.ua/cashregs/check?id=UxI07gWmYOQ&date=20251201&time=16:12&fn=4001246197&sm=46.50",
+  "parsed_params": {
+    "id": "UxI07gWmYOQ",
+    "date": "2025-12-01 16:12:00",
+    "fn": "4001246197"
+  }
+}
