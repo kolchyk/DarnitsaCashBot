@@ -631,6 +631,34 @@ def scrape_receipt_data_via_selenium(url: str) -> dict[str, Any]:
         options.add_experimental_option('useAutomationExtension', False)
         options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
         
+        # Additional options for Heroku/containerized environments
+        options.add_argument('--disable-gpu')
+        options.add_argument('--disable-software-rasterizer')
+        options.add_argument('--disable-extensions')
+        options.add_argument('--disable-background-networking')
+        options.add_argument('--disable-background-timer-throttling')
+        options.add_argument('--disable-backgrounding-occluded-windows')
+        options.add_argument('--disable-breakpad')
+        options.add_argument('--disable-client-side-phishing-detection')
+        options.add_argument('--disable-default-apps')
+        options.add_argument('--disable-hang-monitor')
+        options.add_argument('--disable-popup-blocking')
+        options.add_argument('--disable-prompt-on-repost')
+        options.add_argument('--disable-sync')
+        options.add_argument('--disable-translate')
+        options.add_argument('--metrics-recording-only')
+        options.add_argument('--no-first-run')
+        options.add_argument('--safebrowsing-disable-auto-update')
+        options.add_argument('--enable-automation')
+        options.add_argument('--password-store=basic')
+        options.add_argument('--use-mock-keychain')
+        
+        # Set Chrome binary path for Heroku (if available)
+        import os
+        chrome_binary = os.environ.get('GOOGLE_CHROME_BIN') or '/usr/bin/google-chrome-stable'
+        if os.path.exists(chrome_binary):
+            options.binary_location = chrome_binary
+        
         driver = webdriver.Chrome(options=options)
         driver.set_window_size(1920, 1080)
         

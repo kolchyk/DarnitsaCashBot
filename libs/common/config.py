@@ -76,6 +76,11 @@ class AppSettings(BaseSettings):
     # "auto" means try selenium first, fallback to API if selenium fails
     # "selenium" means use selenium only
     # "api" means use API only (reserved as fallback)
+    
+    # TurboSMS configuration
+    turbosms_token: str | None = Field(default=None, alias="TURBOSMS_TOKEN")
+    turbosms_sender: str | None = Field(default=None, alias="TURBOSMS_SENDER")
+    turbosms_enabled: bool = Field(default=False, alias="TURBOSMS_ENABLED")
 
     @property
     def database_url(self) -> str:

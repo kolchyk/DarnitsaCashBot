@@ -20,6 +20,8 @@ from libs.common.storage import StorageClient
 from libs.data.models import LineItem, Receipt
 from libs.data.repositories import ReceiptRepository, StatisticsRepository, UserRepository
 
+from libs.common import get_settings
+
 from ..exceptions import EncryptionError
 from ..dependencies import (
     get_analytics,
@@ -28,6 +30,7 @@ from ..dependencies import (
     get_storage_client,
 )
 from ..exceptions import UserAlreadyExistsError
+from ..services.turbosms import TurboSmsClient
 from ..schemas import (
     ReceiptLineItem,
     DarnitsaProduct,
@@ -182,17 +185,67 @@ def _filter_darnitsa_products(
 @router.post("/users", response_model=UserResponse)
 async def upsert_user(
     payload: UserUpsertRequest,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session_dep),
 ):
     """Create or update a user."""
     try:
         user_repo = UserRepository(session)
+        
+        # Перевіряємо, чи користувач вже існує (для визначення нового користувача)
+        existing_user = await user_repo.get_by_telegram(payload.telegram_id)
+        is_new_user = existing_user is None
+        # Перевіряємо, чи користувач додає номер телефону вперше
+        had_phone_before = existing_user is not None and existing_user.phone_number is not None
+        
         user = await user_repo.upsert_user(
             telegram_id=payload.telegram_id,
             phone_number=payload.phone_number,
             locale=payload.locale,
         )
         await session.commit()
+        
+        # Надсилаємо SMS новому користувачу з номером телефону або коли користувач додає номер вперше
+        should_send_sms = (
+            user.phone_number  # Є номер телефону
+            and (
+                is_new_user  # Новий користувач
+                or (existing_user is not None and not had_phone_before)  # Додає номер телефону вперше
+            )
+        )
+        
+        if should_send_sms:
+            logger.info(
+                f"Sending welcome SMS to user {payload.telegram_id} "
+                f"(new_user={is_new_user}, had_phone_before={had_phone_before})"
+            )
+            settings = get_settings()
+            if settings.turbosms_enabled:
+                async def send_welcome_sms():
+                    """Функція для надсилання привітального SMS."""
+                    turbosms_client = None
+                    try:
+                        turbosms_client = TurboSmsClient(settings)
+                        message = (
+                            "Вітаємо в Дарниця CashBot!\n"
+                            "Надсилайте чеки з продукцією Дарниця та отримуйте бонуси. "
+                            "Просто відправте фото чека в Telegram боті!"
+                        )
+                        await turbosms_client.send_sms(
+                            phone_number=user.phone_number,
+                            message=message,
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to send welcome SMS to user {payload.telegram_id}: {e}",
+                            exc_info=True,
+                        )
+                    finally:
+                        if turbosms_client:
+                            await turbosms_client.close()
+                
+                background_tasks.add_task(send_welcome_sms)
+        
         return UserResponse(
             id=user.id,
             telegram_id=user.telegram_id,

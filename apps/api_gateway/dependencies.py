@@ -11,6 +11,8 @@ from libs.common.storage import StorageClient
 from libs.common.rate_limit import RateLimiter
 from libs.data.database import get_async_session
 
+from ..services.turbosms import TurboSmsClient
+
 
 async def get_settings_dep() -> AppSettings:
     return get_settings()
@@ -32,4 +34,16 @@ def get_analytics(settings: AppSettings = Depends(get_settings_dep)) -> Analytic
 
 def get_receipt_rate_limiter(settings: AppSettings = Depends(get_settings_dep)) -> RateLimiter:
     return RateLimiter(prefix="receipt", limit=5, ttl_seconds=60, settings=settings)
+
+
+def get_turbosms_client(settings: AppSettings = Depends(get_settings_dep)) -> TurboSmsClient | None:
+    """
+    Отримати екземпляр TurboSmsClient якщо TurboSMS увімкнено.
+    
+    Returns:
+        TurboSmsClient якщо увімкнено, None інакше
+    """
+    if not settings.turbosms_enabled:
+        return None
+    return TurboSmsClient(settings)
 

@@ -482,13 +482,18 @@ async def _notify_scraping_error(telegram_id: int, receipt_id: UUID, scraping_er
     
     settings = get_settings()
     from apps.api_gateway.services.telegram_notifier import TelegramNotifier
+    import html
     
     notifier = TelegramNotifier(settings)
     try:
         # Build error message
         message_parts = ["⚠️ <b>Помилка отримання даних з реєстру фіскальних чеків</b>\n\n"]
         
-        error_description = str(scraping_error)
+        # Escape HTML entities in error description to prevent parsing errors
+        error_description = html.escape(str(scraping_error))
+        # Truncate very long error messages to avoid Telegram message limits
+        if len(error_description) > 500:
+            error_description = error_description[:497] + "..."
         
         message_parts.append(
             "Не вдалося отримати дані чека з сайту податкової служби через браузерну автоматизацію.\n\n"
