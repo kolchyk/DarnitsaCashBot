@@ -627,6 +627,7 @@ def scrape_receipt_data_via_selenium(url: str) -> dict[str, Any]:
         options.add_argument('--headless')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--user-data-dir=/tmp/chrome_data')  # Critical for Heroku - prevents Chrome from accessing user profile directories
         options.add_argument('--disable-blink-features=AutomationControlled')
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option('useAutomationExtension', False)
@@ -666,8 +667,13 @@ def scrape_receipt_data_via_selenium(url: str) -> dict[str, Any]:
         # Try multiple possible binary paths (Chrome, Chromium, or custom env var)
         chrome_binary = os.environ.get('GOOGLE_CHROME_BIN') or None
         if not chrome_binary:
-            # Try Chrome first, then Chromium
-            for binary_path in ['/usr/bin/google-chrome-stable', '/usr/bin/chromium-browser', '/usr/bin/chromium']:
+            # Try Chrome first, then Chromium (including Heroku Aptfile installation path)
+            for binary_path in [
+                '/app/.apt/usr/bin/chromium-browser',  # Heroku Aptfile installation path
+                '/usr/bin/google-chrome-stable',
+                '/usr/bin/chromium-browser',
+                '/usr/bin/chromium'
+            ]:
                 if os.path.exists(binary_path):
                     chrome_binary = binary_path
                     LOGGER.info("Found Chrome binary at: %s", chrome_binary)
