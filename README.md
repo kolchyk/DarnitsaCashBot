@@ -1,27 +1,19 @@
 # DarnitsaCashBot
 
-Платформа автоматизації, яка обробляє чеки з Telegram та валідує покупки Darnitsa. Цей репозиторій відповідає специфікації [prd.md](docs/prd.md).
+Платформа автоматизації, яка обробляє чеки з Telegram та валідує покупки Darnitsa.
 
-## Структура проекту
+## Про проект
 
-```text
-apps/              # Користувацькі точки входу (Telegram бот, HTTP API)
-libs/              # Спільні бібліотеки (конфігурація, доступ до даних, допоміжні функції)
-services/          # Функціональні модулі (OCR, правила, виплати)
-alembic/           # Міграції бази даних
-scripts/           # Допоміжні скрипти для розробки та тестування
-docs/              # Документація проекту
-docker-compose.yml # Локальна інфраструктура: Postgres (опційно)
-```
+DarnitsaCashBot — це Telegram бот, який допомагає користувачам отримувати бонуси за покупки продукції Darnitsa. Користувачі надсилають фото чеків у бот, система автоматично розпізнає інформацію з чеків та нараховує бонуси за відповідні покупки.
+
+## Основні можливості
+
+- Автоматичне розпізнавання чеків з фотографій
+- Валідація покупок продукції Darnitsa
+- Нарахування бонусів за відповідні покупки
+- Зручний інтерфейс через Telegram
 
 ## Швидкий старт
-
-### Вимоги
-
-- Python 3.11-3.12
-- Poetry для управління залежностями
-- Docker та Docker Compose для локальної інфраструктури
-- Tesseract OCR 5.x з мовними пакетами (`ukr`, `rus`, `eng`)
 
 ### Встановлення
 
@@ -29,100 +21,36 @@ docker-compose.yml # Локальна інфраструктура: Postgres (о
 # Встановлення залежностей
 poetry install
 
-# Копіювання прикладу конфігурації (якщо є)
-# cp env.example .env
-
-# Запуск інфраструктури (Postgres)
+# Запуск інфраструктури
 make up
 
 # Застосування міграцій бази даних
 make migrate
 
-# Запуск API Gateway
+# Запуск сервісів
 poetry run api-gateway
-# або
-poetry run uvicorn apps.api_gateway.main:app --reload
-
-# Запуск Telegram бота (в окремому терміналі)
 poetry run telegram-bot
-# або
-poetry run python -m apps.telegram_bot.main
 ```
 
 ### Доступні команди
 
-- `make install` — встановлення залежностей через Poetry
-- `make lint` — перевірка коду (Ruff + mypy)
-- `make fmt` — автоматичне форматування коду
-- `make test` — запуск тестів (pytest)
-- `make up` — запуск інфраструктури через Docker Compose
+- `make install` — встановлення залежностей
+- `make lint` — перевірка коду
+- `make fmt` — форматування коду
+- `make test` — запуск тестів
+- `make up` — запуск інфраструктури
 - `make down` — зупинка інфраструктури
-- `make migrate` — застосування міграцій Alembic
+- `make migrate` — застосування міграцій бази даних
 
-## OCR пайплайн
+## Деплой
 
-### Встановлення Tesseract
+Проект готовий до деплою на Heroku. Детальні інструкції див. у документації проекту.
 
-Встановіть Tesseract 5.x локально з мовними пакетами `ukr`, `rus` та `eng`:
-
-- **macOS**: `brew install tesseract tesseract-lang`
-- **Debian/Ubuntu**: `sudo apt install tesseract-ocr tesseract-ocr-ukr tesseract-ocr-rus tesseract-ocr-eng`
-
-### Налаштування через змінні середовища
-
-Опціональні параметри доступні через змінні середовища (див. `libs/common/config.py`):
-
-- `TESSERACT_CMD`, `TESSDATA_DIR`, `OCR_LANGUAGES`
-- `OCR_AUTO_ACCEPT_THRESHOLD`, `OCR_MANUAL_REVIEW_THRESHOLD`, `OCR_TOTALS_TOLERANCE_PERCENT`
-- `OCR_STORAGE_PREFIX`, `OCR_ARTIFACT_TTL_DAYS`, `OCR_SAVE_PREPROCESSED`
-
-### Використання
-
-OCR запускається безпосередньо з ендпоінта `/bot/receipts`, тому окремі воркери та Docker-сервіси більше не потрібні. Переконайтеся, що Tesseract встановлений у середовищі, де працює API Gateway.
-
-## Якість коду
-
-- `make lint` — Ruff + mypy
-- `make test` — pytest (unit + async integration)
-
-## Деплой на Heroku
-
-Проект готовий до деплою на Heroku. Детальні інструкції див. у [docs/heroku_database_inspection.md](docs/heroku_database_inspection.md) (якщо є окремий файл про деплой).
-
-Швидкий старт:
-
-```bash
-heroku create your-app-name
-heroku addons:create heroku-postgresql:mini
-
-# Встановлення buildpack для системних залежностей (zbar для pyzbar)
-# Якщо використовується .buildpacks файл, це не потрібно
-heroku buildpacks:add --index 1 https://github.com/heroku/heroku-buildpack-apt.git
-
-heroku config:set TELEGRAM_BOT_TOKEN=your_token ENCRYPTION_SECRET=your_secret
-git push heroku main
-heroku run alembic upgrade head
-heroku ps:scale web=1
-```
-
-**Примітка:** Проект використовує `pyzbar` для розпізнавання QR-кодів, що вимагає системну бібліотеку `libzbar0`. Вона встановлюється автоматично через `Aptfile` та `heroku-buildpack-apt`.
-
-## Доступні сервіси
-
-Проект містить кілька сервісів, які можна запускати окремо:
-
-- **API Gateway** (`apps/api_gateway`) — HTTP API для бота та адміністрації
-- **Telegram Bot** (`apps/telegram_bot`) — Telegram бот для обробки чеків
-- **OCR Worker** (`services/ocr_worker`) — воркер для обробки зображень чеків
-- **Bonus Service** (`services/bonus_service`) — сервіс для виплати бонусів
-- **Rules Engine** (`services/rules_engine`) — движок правил для валідації чеків
-
-## Ключова документація
+## Документація
 
 - [PRD](docs/prd.md) — Product Requirements Document
 - [OCR](docs/OCR.md) — Документація по OCR обробці
 - [Telegram Flow](docs/telegram_flow.md) — Опис потоку роботи з Telegram
-- [Heroku Database Inspection](docs/heroku_database_inspection.md) — Робота з базою даних на Heroku
 
 ## Ліцензія
 

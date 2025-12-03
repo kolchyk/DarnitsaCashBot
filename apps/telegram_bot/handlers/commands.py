@@ -246,6 +246,19 @@ async def handle_menu_my_bonuses(message: Message, receipt_client: ReceiptApiCli
         )
 
 
+@router.message(F.text == "💬 Зворотний зв'язок")
+async def handle_menu_feedback(message: Message):
+    """Обработчик кнопки меню 'Зворотний зв'язок'"""
+    feedback_text = (
+        "💬 <b>Зворотний зв'язок</b>\n\n"
+        "Якщо у вас є питання, пропозиції або ви знайшли помилку, будь ласка, напишіть нам!\n\n"
+        "📧 <b>Контакт для зв'язку:</b>\n"
+        "@Ko1chyk\n\n"
+        "💡 Ми завжди раді вашій зворотній зв'язку та готові допомогти!"
+    )
+    await message.answer(feedback_text, reply_markup=main_menu_keyboard(), parse_mode="HTML")
+
+
 @router.message(F.contact)
 async def handle_contact(message: Message, receipt_client: ReceiptApiClient):
     user_info = await receipt_client.register_user(
@@ -317,6 +330,7 @@ def main_menu_keyboard() -> ReplyKeyboardMarkup:
             ],
             [
                 KeyboardButton(text="📊 Статистика"),
+                KeyboardButton(text="💬 Зворотний зв'язок"),
             ],
         ],
         resize_keyboard=True,

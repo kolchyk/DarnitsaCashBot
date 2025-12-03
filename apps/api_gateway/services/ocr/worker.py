@@ -16,7 +16,9 @@ from libs.data.models import Receipt, ReceiptStatus
 from sqlalchemy import select
 
 from .qr_scanner import QRCodeNotFoundError, detect_qr_code
-from .tax_api_client import TaxApiError, fetch_receipt_data, parse_receipt_url
+from .receipt_scraper import scrape_receipt_data_via_selenium, ScrapingError
+# API imports reserved for future use as fallback
+# from .tax_api_client import TaxApiError, fetch_receipt_data, parse_receipt_url
 
 LOGGER = logging.getLogger(__name__)
 
@@ -60,7 +62,7 @@ async def process_message(payload: dict) -> None:
             if telegram_id:
                 await _notify_qr_recognized(telegram_id, receipt_id, qr_url)
             
-            # Step 2: Parse URL and fetch receipt data from tax.gov.ua API
+            # Step 2: Fetch receipt data using Selenium (browser automation)
             scraped_data = {
                 "merchant": None,
                 "purchase_ts": None,
@@ -77,83 +79,67 @@ async def process_message(payload: dict) -> None:
                 "anomalies": [],
             }
             
-            # Try to fetch data from tax.gov.ua API if URL is valid and token is configured
-            if qr_url and qr_url.startswith(("http://", "https://")) and settings.tax_gov_ua_api_token:
+            # Fetch data using Selenium if URL is valid
+            if qr_url and qr_url.startswith(("http://", "https://")):
                 try:
-                    # Parse URL to extract parameters
-                    url_params = parse_receipt_url(qr_url)
-                    receipt_api_id = url_params.get("id")
+                    LOGGER.info(
+                        "Fetching receipt data using Selenium for receipt %s: url=%s",
+                        receipt_id,
+                        qr_url,
+                    )
                     
-                    if receipt_api_id:
-                        LOGGER.info(
-                            "Fetching receipt data from tax.gov.ua API for receipt %s: id=%s, date=%s, fn=%s",
-                            receipt_id,
-                            receipt_api_id,
-                            url_params.get("date"),
-                            url_params.get("fn"),
-                        )
-                        
-                        # Fetch receipt data from API
-                        api_response = await fetch_receipt_data(
-                            receipt_id=receipt_api_id,
-                            token=settings.tax_gov_ua_api_token,
-                            date=url_params.get("date"),
-                            fn=url_params.get("fn"),
-                            receipt_type=3,  # Text document for display (UTF-8)
-                        )
-                        
-                        LOGGER.info(
-                            "Received API response for receipt %s: fn=%s, xml=%s, sign=%s, check_length=%d",
-                            receipt_id,
-                            api_response.get("fn"),
-                            api_response.get("xml"),
-                            api_response.get("sign"),
-                            len(api_response.get("check", "")),
-                        )
-                        
-                        # Store API response in scraped_data for further processing
-                        scraped_data["tax_api_response"] = api_response
-                        scraped_data["anomalies"] = []
-                        
-                        # Extract merchant name if available
-                        if api_response.get("name"):
-                            scraped_data["merchant"] = api_response["name"]
-                        
-                        # Extract date if available
-                        if url_params.get("date"):
-                            try:
-                                scraped_data["purchase_ts"] = url_params["date"]
-                            except Exception as e:
-                                LOGGER.warning("Failed to parse purchase date: %s", e)
-                        
-                        # Send API response to user
-                        if telegram_id:
-                            await _notify_api_response(telegram_id, receipt_id, api_response)
-                        
-                    else:
-                        LOGGER.warning("Could not extract receipt ID from URL: %s", qr_url)
-                        scraped_data["anomalies"].append("Could not extract receipt ID from QR URL")
-                        
-                except TaxApiError as e:
-                    LOGGER.warning("Failed to fetch receipt data from tax.gov.ua API for receipt %s: %s", receipt_id, e)
-                    scraped_data["anomalies"].append(f"Tax.gov.ua API error: {str(e)}")
-                    # Notify user about API error
+                    # Fetch receipt data using Selenium (runs in thread pool as it's synchronous)
+                    selenium_data = await asyncio.to_thread(scrape_receipt_data_via_selenium, qr_url)
+                    
+                    LOGGER.info(
+                        "Received Selenium data for receipt %s: merchant=%s, line_items=%d, total=%s",
+                        receipt_id,
+                        selenium_data.get("merchant"),
+                        len(selenium_data.get("line_items", [])),
+                        selenium_data.get("total"),
+                    )
+                    
+                    # Merge Selenium data into scraped_data
+                    scraped_data.update(selenium_data)
+                    
+                except ScrapingError as e:
+                    LOGGER.warning("Failed to fetch receipt data using Selenium for receipt %s: %s", receipt_id, e)
+                    scraped_data["anomalies"].append(f"Selenium scraping error: {str(e)}")
+                    # Notify user about scraping error
                     if telegram_id:
-                        await _notify_api_error(telegram_id, receipt_id, e)
+                        await _notify_scraping_error(telegram_id, receipt_id, e)
                 except Exception as e:
                     LOGGER.error(
-                        "Unexpected error while fetching receipt data from tax.gov.ua API for receipt %s: %s",
+                        "Unexpected error while fetching receipt data using Selenium for receipt %s: %s",
                         receipt_id,
                         e,
                         exc_info=True,
                     )
                     scraped_data["anomalies"].append(f"Unexpected error fetching receipt data: {str(e)}")
-            elif not settings.tax_gov_ua_api_token:
-                LOGGER.debug("Tax.gov.ua API token not configured, skipping API request for receipt %s", receipt_id)
-                scraped_data["anomalies"].append("Tax.gov.ua API token not configured")
             else:
                 LOGGER.warning("Invalid QR URL format for receipt %s: %s", receipt_id, qr_url)
                 scraped_data["anomalies"].append("Invalid QR URL format")
+            
+            # API method reserved as fallback (currently not used)
+            # Uncomment below code if you want to use API as fallback when Selenium fails
+            # 
+            # if not scraped_data.get("line_items") and qr_url and qr_url.startswith(("http://", "https://")) and settings.tax_gov_ua_api_token:
+            #     try:
+            #         from .tax_api_client import TaxApiError, fetch_receipt_data, parse_receipt_url
+            #         url_params = parse_receipt_url(qr_url)
+            #         receipt_api_id = url_params.get("id")
+            #         if receipt_api_id:
+            #             LOGGER.info("Falling back to API for receipt %s", receipt_id)
+            #             api_response = await fetch_receipt_data(
+            #                 receipt_id=receipt_api_id,
+            #                 token=settings.tax_gov_ua_api_token,
+            #                 date=url_params.get("date"),
+            #                 fn=url_params.get("fn"),
+            #                 receipt_type=3,
+            #             )
+            #             # Process API response...
+            #     except Exception as e:
+            #         LOGGER.warning("API fallback also failed: %s", e)
             
         except QRCodeNotFoundError as exc:
             LOGGER.warning("QR code not found for receipt %s: %s", receipt_id, exc, exc_info=True)
@@ -301,7 +287,12 @@ async def _notify_qr_recognized(telegram_id: int, receipt_id: UUID, qr_url: str)
 
 
 async def _notify_api_response(telegram_id: int, receipt_id: UUID, api_response: dict[str, Any]) -> None:
-    """Send API response from tax.gov.ua to user via Telegram."""
+    """
+    Send API response from tax.gov.ua to user via Telegram.
+    
+    NOTE: This function is reserved for future use when API method is enabled as fallback.
+    Currently not used as we're using Selenium only.
+    """
     LOGGER.info("Attempting to send API response to user %s for receipt %s", telegram_id, receipt_id)
     
     settings = get_settings()
@@ -407,8 +398,16 @@ async def _notify_api_response(telegram_id: int, receipt_id: UUID, api_response:
         await notifier.close()
 
 
-async def _notify_api_error(telegram_id: int, receipt_id: UUID, api_error: TaxApiError) -> None:
-    """Send API error notification to user via Telegram."""
+async def _notify_api_error(telegram_id: int, receipt_id: UUID, api_error: Any) -> None:
+    """
+    Send API error notification to user via Telegram.
+    
+    NOTE: This function is reserved for future use when API method is enabled as fallback.
+    Currently not used as we're using Selenium only.
+    """
+    # Import TaxApiError only when needed (for future use)
+    from .tax_api_client import TaxApiError
+    
     LOGGER.info("Attempting to send API error notification to user %s for receipt %s", telegram_id, receipt_id)
     
     settings = get_settings()
@@ -468,6 +467,49 @@ async def _notify_api_error(telegram_id: int, receipt_id: UUID, api_error: TaxAp
     except Exception as e:
         LOGGER.error(
             "Exception while sending API error notification to user %s for receipt %s: %s",
+            telegram_id,
+            receipt_id,
+            e,
+            exc_info=True,
+        )
+    finally:
+        await notifier.close()
+
+
+async def _notify_scraping_error(telegram_id: int, receipt_id: UUID, scraping_error: ScrapingError) -> None:
+    """Send scraping error notification to user via Telegram."""
+    LOGGER.info("Attempting to send scraping error notification to user %s for receipt %s", telegram_id, receipt_id)
+    
+    settings = get_settings()
+    from apps.api_gateway.services.telegram_notifier import TelegramNotifier
+    
+    notifier = TelegramNotifier(settings)
+    try:
+        # Build error message
+        message_parts = ["⚠️ <b>Помилка отримання даних з реєстру фіскальних чеків</b>\n\n"]
+        
+        error_description = str(scraping_error)
+        
+        message_parts.append(
+            "Не вдалося отримати дані чека з сайту податкової служби через браузерну автоматизацію.\n\n"
+            f"<b>Деталі помилки:</b> {error_description}\n\n"
+            "💡 <b>Можливі причини:</b>\n"
+            "• Сайт тимчасово недоступний\n"
+            "• Чек не знайдено в системі\n"
+            "• Помилка при обробці даних\n\n"
+            "✅ Ваш чек все одно буде оброблено та перевірено на наявність продуктів Дарниця."
+        )
+        
+        message = "".join(message_parts)
+        
+        success = await notifier.send_message(telegram_id, message)
+        if success:
+            LOGGER.info("Successfully sent scraping error notification to user %s for receipt %s", telegram_id, receipt_id)
+        else:
+            LOGGER.warning("Failed to send scraping error notification to user %s for receipt %s", telegram_id, receipt_id)
+    except Exception as e:
+        LOGGER.error(
+            "Exception while sending scraping error notification to user %s for receipt %s: %s",
             telegram_id,
             receipt_id,
             e,
