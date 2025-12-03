@@ -653,10 +653,17 @@ def scrape_receipt_data_via_selenium(url: str) -> dict[str, Any]:
         options.add_argument('--password-store=basic')
         options.add_argument('--use-mock-keychain')
         
-        # Set Chrome binary path for Heroku (if available)
+        # Set Chrome/Chromium binary path for Heroku (if available)
         import os
-        chrome_binary = os.environ.get('GOOGLE_CHROME_BIN') or '/usr/bin/google-chrome-stable'
-        if os.path.exists(chrome_binary):
+        # Try multiple possible binary paths (Chrome, Chromium, or custom env var)
+        chrome_binary = os.environ.get('GOOGLE_CHROME_BIN') or None
+        if not chrome_binary:
+            # Try Chrome first, then Chromium
+            for binary_path in ['/usr/bin/google-chrome-stable', '/usr/bin/chromium-browser', '/usr/bin/chromium']:
+                if os.path.exists(binary_path):
+                    chrome_binary = binary_path
+                    break
+        if chrome_binary and os.path.exists(chrome_binary):
             options.binary_location = chrome_binary
         
         driver = webdriver.Chrome(options=options)
