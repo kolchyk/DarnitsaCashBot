@@ -15,6 +15,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
 
+from .chrome_bundle import ChromeBundleError, get_or_create_bundle
+
 LOGGER = logging.getLogger(__name__)
 
 CHROME_BINARY_CANDIDATES = [
@@ -44,6 +46,12 @@ HEADLESS_USER_AGENT = (
 )
 MAX_DRIVER_START_ATTEMPTS = 3
 _AUTO_DOWNLOAD_FLAG = os.getenv("ENABLE_CHROMEDRIVER_AUTO_DOWNLOAD", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+_ENABLE_CFT_FALLBACK = os.getenv("ENABLE_CHROME_FOR_TESTING_FALLBACK", "1").lower() in {
     "1",
     "true",
     "yes",
@@ -144,7 +152,12 @@ def _cleanup_user_data_dir(path: str | None) -> None:
     shutil.rmtree(path, ignore_errors=True)
 
 
-def _build_chrome_options(*, user_data_dir: str, headless: bool = True) -> webdriver.ChromeOptions:
+def _build_chrome_options(
+    *,
+    user_data_dir: str,
+    headless: bool = True,
+    binary_location: str | None = None,
+) -> webdriver.ChromeOptions:
     """Construct Chrome options tuned for Heroku/container environments."""
     options = webdriver.ChromeOptions()
     
@@ -190,7 +203,7 @@ def _build_chrome_options(*, user_data_dir: str, headless: bool = True) -> webdr
     options.add_argument(f"--data-path={os.path.join(user_data_dir, 'data-path')}")
     options.add_argument(f"--disk-cache-dir={os.path.join(user_data_dir, 'cache')}")
     
-    chrome_binary = _resolve_chrome_binary()
+    chrome_binary = binary_location or _resolve_chrome_binary()
     if chrome_binary:
         options.binary_location = chrome_binary
     
@@ -203,6 +216,8 @@ def _start_chrome_driver(*, user_data_dir: str, headless: bool = True) -> webdri
     service = _create_chromedriver_service()
     last_error: Exception | None = None
     width, height = [int(value) for value in CHROME_WINDOW_SIZE.split(",")]
+    fallback_used = False
+    fallback_failed = False
     
     for attempt in range(1, MAX_DRIVER_START_ATTEMPTS + 1):
         try:
@@ -222,6 +237,34 @@ def _start_chrome_driver(*, user_data_dir: str, headless: bool = True) -> webdri
                 MAX_DRIVER_START_ATTEMPTS,
                 exc,
             )
+
+            if (
+                _ENABLE_CFT_FALLBACK
+                and not fallback_used
+                and not fallback_failed
+            ):
+                try:
+                    bundle = get_or_create_bundle()
+                except ChromeBundleError as bundle_exc:
+                    fallback_failed = True
+                    LOGGER.warning(
+                        "Chrome-for-Testing fallback unavailable: %s",
+                        bundle_exc,
+                    )
+                else:
+                    options = _build_chrome_options(
+                        user_data_dir=user_data_dir,
+                        headless=headless,
+                        binary_location=bundle.chrome_path,
+                    )
+                    service = Service(bundle.driver_path)
+                    fallback_used = True
+                    LOGGER.info(
+                        "Retrying Chrome startup with Chrome-for-Testing bundle %s",
+                        bundle.version,
+                    )
+                    continue
+            
             time.sleep(min(4, attempt * 2))
     
     raise ScrapingError(f"Failed to start headless Chrome: {last_error}") from last_error

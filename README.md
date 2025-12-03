@@ -60,6 +60,7 @@ poetry run telegram-bot
    python scripts/test_parse_page.py --smoke
    ```
 5. За детальним чек-листом та порадами звертайтесь до `docs/SELENIUM_RUNBOOK.md`.
+6. Якщо попередньо встановлений Chromium/Chrome не стартує, сервіс автоматично завантажить Chrome for Testing + chromedriver у `/tmp/chrome-for-testing`. Поведінку можна вимкнути змінною `ENABLE_CHROME_FOR_TESTING_FALLBACK=0` або задати власну версію через `CHROME_FOR_TESTING_VERSION`.
 
 ## Документація
 
