@@ -1,0 +1,63 @@
+# DarnitsaCashBot - Cursor Rules
+
+## Project Overview
+
+Telegram bot for receipt QR code scanning and Darnitsa product validation. Automates bonus payouts.
+
+- **Language**: Ukrainian (uk), Python 3.11+
+- **Docs**: `docs/prd.md`
+
+## Tech Stack
+
+- **FastAPI** — API Gateway (`apps/api_gateway/`)
+- **aiogram 3.x** — Telegram Bot (`apps/telegram_bot/`)
+- **SQLAlchemy 2.x + asyncpg** — Async PostgreSQL
+- **Pydantic-Settings** — Configuration
+- **Alembic** — Migrations
+- **pyzbar + Pillow** — QR code detection
+- **Ruff + mypy** — Linting (strict mode)
+
+## Project Structure
+
+```
+apps/api_gateway/    # FastAPI routes, services, schemas
+apps/telegram_bot/   # aiogram handlers, middlewares
+libs/common/         # Config, logging, utilities
+libs/data/           # Database models, repositories
+alembic/             # Migrations (YYYYMMDD_NN_description.py)
+tests/               # pytest async tests
+```
+
+## Code Style
+
+- `from __future__ import annotations` — always
+- Type hints mandatory, mypy strict
+- Line length: 100 chars
+- Async/await for all I/O
+- Import order: stdlib → third-party → `apps`, `libs`, `services`
+
+## Patterns
+
+**Repository** — DB access in `libs/data/repositories.py`
+**Settings** — `from libs.common import get_settings`
+**FastAPI DI** — `Depends(get_async_session)`
+**aiogram Router** — handlers in `apps/telegram_bot/handlers/`
+
+## Commands
+
+```bash
+make lint      # Ruff + mypy
+make fmt       # Format
+make test      # pytest
+make migrate   # Alembic upgrade
+```
+
+## Required Env Vars
+
+- `TELEGRAM_BOT_TOKEN`
+- `ENCRYPTION_SECRET`
+
+## Deployment
+
+Heroku with `heroku-buildpack-apt` for libzbar0
+

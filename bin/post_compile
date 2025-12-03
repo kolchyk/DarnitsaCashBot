@@ -1,0 +1,13 @@
+#!/bin/bash
+# Post-compile hook for Heroku to install Playwright browser
+
+echo "-----> Installing Playwright Chromium browser..."
+
+# Set up Playwright to use /app/.cache for browsers
+export PLAYWRIGHT_BROWSERS_PATH=/app/.playwright-browsers
+
+# Install only chromium to save space
+python -m playwright install chromium
+
+echo "-----> Playwright Chromium installed successfully!"
+

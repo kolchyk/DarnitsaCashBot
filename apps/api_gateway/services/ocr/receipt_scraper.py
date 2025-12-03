@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
 import re
 from datetime import datetime
 from html.parser import HTMLParser
 from typing import Any
-
-import httpx
 
 LOGGER = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ class SimpleHTMLParser(HTMLParser):
 def scrape_receipt_data(url: str) -> dict[str, Any]:
     """
     Scrape receipt data from tax.gov.ua receipt page.
-    Uses only standard library html.parser - no BeautifulSoup needed.
+    Uses Playwright for JavaScript rendering (tax.gov.ua is an Angular SPA).
     
     Args:
         url: URL to the receipt page (cabinet.tax.gov.ua/cashregs/check?id=...)
@@ -81,86 +81,179 @@ def scrape_receipt_data(url: str) -> dict[str, Any]:
     Raises:
         ScrapingError: If scraping fails
     """
-    LOGGER.info("Starting receipt scraping: url=%s", url)
+    LOGGER.info("Starting receipt scraping with Playwright: url=%s", url)
+    
+    # Run async scraping in sync context
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    
+    return loop.run_until_complete(_scrape_with_playwright(url))
+
+
+async def _scrape_with_playwright(url: str) -> dict[str, Any]:
+    """Async implementation of receipt scraping using Playwright."""
+    try:
+        from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
+    except ImportError as e:
+        LOGGER.error("Playwright not installed: %s", e)
+        raise ScrapingError("Playwright not available. Install with: pip install playwright && playwright install chromium") from e
+    
+    html_content = ""
     
     try:
-        # Fetch page content with httpx
-        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
-            response = client.get(url)
-            response.raise_for_status()
-            html_content = response.text
-            LOGGER.debug("Page fetched with httpx: status=%d, content_length=%d", response.status_code, len(html_content))
+        async with async_playwright() as p:
+            # Launch browser (headless mode for server)
+            browser_args = [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",  # Important for Docker/Heroku
+                "--disable-gpu",
+                "--single-process",  # Reduce memory usage on Heroku
+            ]
+            
+            # Check for Heroku environment
+            is_heroku = bool(os.environ.get("DYNO"))
+            if is_heroku:
+                LOGGER.debug("Running on Heroku, using optimized settings")
+            
+            browser = await p.chromium.launch(
+                headless=True,
+                args=browser_args,
+            )
+            
+            try:
+                # Create new page with timeout
+                page = await browser.new_page()
+                page.set_default_timeout(30000)  # 30 seconds
+                
+                LOGGER.debug("Navigating to URL: %s", url)
+                
+                # Navigate to page
+                await page.goto(url, wait_until="networkidle")
+                
+                # Wait for receipt content to load
+                # The Angular app renders into <app-root>
+                # Wait for specific content indicators
+                try:
+                    # Wait for any of these selectors that indicate content loaded
+                    await page.wait_for_selector(
+                        "table, .receipt-items, .check-items, .product-list, [class*='item'], [class*='product']",
+                        timeout=15000
+                    )
+                    LOGGER.debug("Content selector found, page loaded")
+                except PlaywrightTimeout:
+                    LOGGER.warning("Timeout waiting for content selector, proceeding anyway")
+                
+                # Additional wait for dynamic content
+                await page.wait_for_timeout(2000)
+                
+                # Get rendered HTML
+                html_content = await page.content()
+                LOGGER.debug("Got rendered HTML: %d characters", len(html_content))
+                
+                # Debug: log first part of HTML
+                LOGGER.debug("HTML preview (first 500 chars): %s", html_content[:500])
+                
+            finally:
+                await browser.close()
         
-        # Parse HTML with standard library parser
-        parser = SimpleHTMLParser()
-        parser.feed(html_content)
-        page_text = " ".join(parser.text_content)
+        # Parse rendered HTML
+        return _parse_rendered_html(html_content, url)
         
-        # Extract merchant name
-        merchant = _extract_merchant(page_text, html_content)
-        LOGGER.debug("Extracted merchant: %s", merchant)
-        
-        # Extract purchase timestamp
-        purchase_ts = _extract_purchase_timestamp(page_text, url)
-        LOGGER.debug("Extracted purchase timestamp: %s", purchase_ts)
-        
-        # Extract line items from tables
-        line_items = _extract_line_items(parser.tables, page_text)
-        LOGGER.info("Extracted %d line items", len(line_items))
-        
-        # Extract total
-        total = _extract_total(page_text, line_items)
-        LOGGER.debug("Extracted total: %s", total)
-        
-        # Calculate confidence (scraped data is 100% accurate)
-        line_confidences = [item.get("confidence", 1.0) for item in line_items]
-        mean_confidence = float(sum(line_confidences) / len(line_confidences)) if line_confidences else 1.0
-        
-        # Build payload
-        payload = {
-            "merchant": merchant,
-            "purchase_ts": purchase_ts.isoformat() if purchase_ts else None,
-            "total": total,
-            "line_items": [
-                {
-                    "name": item["name"],
-                    "original_name": item.get("original_name", item["name"]),
-                    "normalized_name": item.get("normalized_name"),
-                    "quantity": item["quantity"],
-                    "price": item["price"],
-                    "confidence": item.get("confidence", 1.0),
-                    "sku_code": item.get("sku_code"),
-                    "sku_match_score": item.get("sku_match_score", 0.0),
-                    "is_darnitsa": item.get("is_darnitsa", False),
-                }
-                for item in line_items
-            ],
-            "confidence": {
-                "mean": mean_confidence,
-                "min": min(line_confidences) if line_confidences else 1.0,
-                "max": max(line_confidences) if line_confidences else 1.0,
-                "token_count": len(line_items),
-                "auto_accept_candidate": True,  # Scraped data is reliable
-            },
-            "manual_review_required": False,
-            "anomalies": [],
-        }
-        
-        LOGGER.info(
-            "Scraping completed: merchant=%s, line_items=%d, total=%s",
-            merchant,
-            len(line_items),
-            total,
-        )
-        
-        return payload
-        
-    except httpx.HTTPError as e:
-        LOGGER.error("HTTP error while scraping: %s", e, exc_info=True)
-        raise ScrapingError(f"Failed to fetch receipt page: {str(e)}") from e
+    except PlaywrightTimeout as e:
+        LOGGER.error("Playwright timeout: %s", e)
+        raise ScrapingError(f"Timeout loading receipt page: {str(e)}") from e
     except Exception as e:
-        LOGGER.error("Error scraping receipt: %s", e, exc_info=True)
+        LOGGER.error("Error scraping receipt with Playwright: %s", e, exc_info=True)
         raise ScrapingError(f"Failed to scrape receipt data: {str(e)}") from e
+
+
+def _parse_rendered_html(html_content: str, url: str) -> dict[str, Any]:
+    """Parse the rendered HTML and extract receipt data."""
+    
+    # Parse HTML with standard library parser
+    parser = SimpleHTMLParser()
+    parser.feed(html_content)
+    page_text = " ".join(parser.text_content)
+    
+    LOGGER.debug("Parsed HTML: %d tables, %d text segments", len(parser.tables), len(parser.text_content))
+    LOGGER.debug("Page text preview: %s", page_text[:500] if page_text else "(empty)")
+    
+    # Extract merchant name
+    merchant = _extract_merchant(page_text, html_content)
+    LOGGER.debug("Extracted merchant: %s", merchant)
+    
+    # Extract purchase timestamp
+    purchase_ts = _extract_purchase_timestamp(page_text, url)
+    LOGGER.debug("Extracted purchase timestamp: %s", purchase_ts)
+    
+    # Extract line items from tables
+    line_items = _extract_line_items(parser.tables, page_text)
+    LOGGER.info("Extracted %d line items", len(line_items))
+    
+    # Extract total (try from URL first for tax.gov.ua)
+    total = _extract_total_from_url(url)
+    if total is None:
+        total = _extract_total(page_text, line_items)
+    LOGGER.debug("Extracted total: %s", total)
+    
+    # Calculate confidence (scraped data is 100% accurate)
+    line_confidences = [item.get("confidence", 1.0) for item in line_items]
+    mean_confidence = float(sum(line_confidences) / len(line_confidences)) if line_confidences else 1.0
+    
+    # Build payload
+    payload = {
+        "merchant": merchant,
+        "purchase_ts": purchase_ts.isoformat() if purchase_ts else None,
+        "total": total,
+        "line_items": [
+            {
+                "name": item["name"],
+                "original_name": item.get("original_name", item["name"]),
+                "normalized_name": item.get("normalized_name"),
+                "quantity": item["quantity"],
+                "price": item["price"],
+                "confidence": item.get("confidence", 1.0),
+                "sku_code": item.get("sku_code"),
+                "sku_match_score": item.get("sku_match_score", 0.0),
+                "is_darnitsa": item.get("is_darnitsa", False),
+            }
+            for item in line_items
+        ],
+        "confidence": {
+            "mean": mean_confidence,
+            "min": min(line_confidences) if line_confidences else 1.0,
+            "max": max(line_confidences) if line_confidences else 1.0,
+            "token_count": len(line_items),
+            "auto_accept_candidate": True,  # Scraped data is reliable
+        },
+        "manual_review_required": False,
+        "anomalies": [],
+    }
+    
+    LOGGER.info(
+        "Scraping completed: merchant=%s, line_items=%d, total=%s",
+        merchant,
+        len(line_items),
+        total,
+    )
+    
+    return payload
+
+
+def _extract_total_from_url(url: str) -> int | None:
+    """Extract total amount from URL parameters (sm=XX.XX in tax.gov.ua URLs)."""
+    match = re.search(r"[?&]sm=(\d+[.,]?\d*)", url)
+    if match:
+        try:
+            total_str = match.group(1).replace(",", ".")
+            return int(float(total_str) * 100)  # Convert to kopecks
+        except ValueError:
+            pass
+    return None
 
 
 def _extract_merchant(page_text: str, html_content: str) -> str | None:
@@ -171,6 +264,7 @@ def _extract_merchant(page_text: str, html_content: str) -> str | None:
         r'class=["\']merchant["\'][^>]*>(.*?)<',
         r'class=["\']store-name["\'][^>]*>(.*?)<',
         r'class=["\']company-name["\'][^>]*>(.*?)<',
+        r'class=["\'][^"\']*seller[^"\']*["\'][^>]*>(.*?)<',
         r'<title>(.*?)</title>',
     ]
     
@@ -178,19 +272,22 @@ def _extract_merchant(page_text: str, html_content: str) -> str | None:
         match = re.search(pattern, html_content, re.IGNORECASE | re.DOTALL)
         if match:
             text = re.sub(r'<[^>]+>', '', match.group(1)).strip()
-            if text and len(text) > 3:
+            if text and len(text) > 3 and text != "Електронний кабінет платника":
                 return text
     
     # Try to find in text content with keywords
-    lines = page_text.split('\n')
-    for i, line in enumerate(lines):
-        line_lower = line.lower()
-        if any(keyword in line_lower for keyword in ["магазин", "торговець", "компанія", "merchant", "store"]):
-            # Try next line
+    keywords = ["пн", "єдрпоу", "торговець", "продавець", "магазин", "компанія", "тов ", "фоп "]
+    lines = page_text.split()
+    
+    # Look for company identifiers
+    for i, word in enumerate(lines):
+        word_lower = word.lower()
+        if any(kw in word_lower for kw in keywords):
+            # Try to get next few words as company name
             if i + 1 < len(lines):
-                merchant_text = lines[i + 1].strip()
-                if merchant_text and len(merchant_text) > 3:
-                    return merchant_text
+                potential_name = " ".join(lines[i:min(i+5, len(lines))])
+                if len(potential_name) > 5:
+                    return potential_name[:100]  # Limit length
     
     return None
 
@@ -226,7 +323,7 @@ def _parse_datetime(dt_str: str) -> datetime | None:
 
 def _extract_purchase_timestamp(page_text: str, url: str) -> datetime | None:
     """Extract purchase timestamp from the receipt page or URL."""
-    # Try to extract from URL parameters first
+    # Try to extract from URL parameters first (tax.gov.ua format)
     date_match = re.search(r"date=(\d{8})", url)
     time_match = re.search(r"time=(\d{2}):(\d{2})", url)
     
@@ -280,38 +377,57 @@ def _extract_line_items(tables: list[list[list[str]]], page_text: str) -> list[d
     
     # If no items found in tables, try regex patterns on text
     if not line_items:
-        lines = page_text.split("\n")
-        for line in lines:
-            line = line.strip()
-            if not line or len(line) < 5:
-                continue
-            
-            # Try to match patterns like "Product Name 2 x 50.00" or "Product Name 100.00"
-            item_match = re.search(r"(.+?)\s+(\d+)\s*[xх×]\s*(\d+[.,]\d+)", line)
-            if item_match:
-                name = item_match.group(1).strip()
-                quantity = int(item_match.group(2))
-                price_str = item_match.group(3).replace(",", ".")
-                price = int(float(price_str) * 100)  # Convert to kopecks
+        line_items = _extract_items_from_text(page_text)
+    
+    return line_items
+
+
+def _extract_items_from_text(page_text: str) -> list[dict[str, Any]]:
+    """Extract line items from page text using regex patterns."""
+    line_items = []
+    
+    # Pattern for items like "Product Name 2 x 50.00" or "2 x 50.00 Product Name"
+    patterns = [
+        # Name qty x price format
+        r"([А-Яа-яІіЇїЄєҐґA-Za-z][А-Яа-яІіЇїЄєҐґA-Za-z0-9\s\-\.]+?)\s+(\d+(?:[.,]\d+)?)\s*[xх×]\s*(\d+[.,]\d+)",
+        # Name price format (qty=1)
+        r"([А-Яа-яІіЇїЄєҐґA-Za-z][А-Яа-яІіЇїЄєҐґA-Za-z0-9\s\-\.]+?)\s+(\d+[.,]\d+)\s*(?:грн|₴|UAH)?(?:\s|$)",
+    ]
+    
+    for pattern in patterns:
+        matches = re.finditer(pattern, page_text, re.IGNORECASE)
+        for match in matches:
+            try:
+                if len(match.groups()) == 3:
+                    # Name, qty, price pattern
+                    name = match.group(1).strip()
+                    quantity = int(float(match.group(2).replace(",", ".")))
+                    price_str = match.group(3).replace(",", ".")
+                    price = int(float(price_str) * 100)
+                else:
+                    # Name, price pattern (qty=1)
+                    name = match.group(1).strip()
+                    quantity = 1
+                    price_str = match.group(2).replace(",", ".")
+                    price = int(float(price_str) * 100)
+                
+                # Skip if name looks like a total or header
+                skip_keywords = ["всього", "итого", "total", "сума", "пдв", "знижка", "разом"]
+                if any(kw in name.lower() for kw in skip_keywords):
+                    continue
+                
+                # Skip very short names
+                if len(name) < 3:
+                    continue
+                
                 line_items.append({
                     "name": name,
                     "quantity": quantity,
                     "price": price,
                     "confidence": 1.0,
                 })
-            else:
-                # Try pattern without quantity: "Product Name 100.00"
-                item_match = re.search(r"(.+?)\s+(\d+[.,]\d+)\s*(?:грн|₴|UAH)?", line)
-                if item_match:
-                    name = item_match.group(1).strip()
-                    price_str = item_match.group(2).replace(",", ".")
-                    price = int(float(price_str) * 100)
-                    line_items.append({
-                        "name": name,
-                        "quantity": 1,
-                        "price": price,
-                        "confidence": 1.0,
-                    })
+            except (ValueError, IndexError):
+                continue
     
     return line_items
 
@@ -362,7 +478,7 @@ def _parse_item_row(cells: list[str]) -> dict[str, Any] | None:
 def _extract_total(page_text: str, line_items: list[dict[str, Any]]) -> int | None:
     """Extract total amount from the receipt page."""
     # Try to find total in page
-    total_keywords = ["всього", "итого", "total", "сума", "sum", "разом"]
+    total_keywords = ["всього", "итого", "total", "сума", "sum", "разом", "до сплати"]
     
     for keyword in total_keywords:
         pattern = rf"{keyword}[:\s]+(\d+[.,]\d+)"
@@ -381,6 +497,3 @@ def _extract_total(page_text: str, line_items: list[dict[str, Any]]) -> int | No
             return calculated_total
     
     return None
-
-
-
