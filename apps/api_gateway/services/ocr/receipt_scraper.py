@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -652,9 +653,16 @@ def scrape_receipt_data_via_selenium(url: str) -> dict[str, Any]:
         options.add_argument('--enable-automation')
         options.add_argument('--password-store=basic')
         options.add_argument('--use-mock-keychain')
+        # Additional options for Heroku dyno constraints
+        options.add_argument('--disable-setuid-sandbox')  # Required for Heroku
+        options.add_argument('--disable-features=VizDisplayCompositor')  # Disable display compositor
+        options.add_argument('--window-size=1920,1080')  # Set window size
+        options.add_argument('--disable-infobars')  # Disable info bars
         
         # Set Chrome/Chromium binary path for Heroku (if available)
         import os
+        import shutil
+        
         # Try multiple possible binary paths (Chrome, Chromium, or custom env var)
         chrome_binary = os.environ.get('GOOGLE_CHROME_BIN') or None
         if not chrome_binary:
@@ -662,11 +670,52 @@ def scrape_receipt_data_via_selenium(url: str) -> dict[str, Any]:
             for binary_path in ['/usr/bin/google-chrome-stable', '/usr/bin/chromium-browser', '/usr/bin/chromium']:
                 if os.path.exists(binary_path):
                     chrome_binary = binary_path
+                    LOGGER.info("Found Chrome binary at: %s", chrome_binary)
                     break
+        
         if chrome_binary and os.path.exists(chrome_binary):
             options.binary_location = chrome_binary
+        else:
+            LOGGER.warning("Chrome binary not found, using system default")
         
-        driver = webdriver.Chrome(options=options)
+        # Configure ChromeDriver service for Heroku
+        chrome_driver_path = os.environ.get('CHROMEDRIVER_PATH') or None
+        if not chrome_driver_path:
+            # Try common ChromeDriver locations
+            for driver_path in ['/usr/bin/chromedriver', '/usr/local/bin/chromedriver', '/app/.chromedriver/bin/chromedriver']:
+                if os.path.exists(driver_path):
+                    chrome_driver_path = driver_path
+                    LOGGER.info("Found ChromeDriver at: %s", chrome_driver_path)
+                    break
+        
+        # Use Service if ChromeDriver path is found, otherwise let Selenium manage it
+        service = None
+        if chrome_driver_path and os.path.exists(chrome_driver_path):
+            service = Service(chrome_driver_path)
+            LOGGER.info("Using ChromeDriver service at: %s", chrome_driver_path)
+        else:
+            # Try to find chromedriver in PATH
+            chromedriver_in_path = shutil.which('chromedriver')
+            if chromedriver_in_path:
+                service = Service(chromedriver_in_path)
+                LOGGER.info("Using ChromeDriver from PATH: %s", chromedriver_in_path)
+            else:
+                # Fallback to webdriver-manager if available
+                try:
+                    from webdriver_manager.chrome import ChromeDriverManager
+                    driver_path = ChromeDriverManager().install()
+                    service = Service(driver_path)
+                    LOGGER.info("Using ChromeDriver from webdriver-manager: %s", driver_path)
+                except ImportError:
+                    LOGGER.warning("ChromeDriver not found and webdriver-manager not available, Selenium will attempt to use system default")
+                except Exception as e:
+                    LOGGER.warning("Failed to install ChromeDriver via webdriver-manager: %s, Selenium will attempt to use system default", e)
+        
+        # Create driver with service if available
+        if service:
+            driver = webdriver.Chrome(service=service, options=options)
+        else:
+            driver = webdriver.Chrome(options=options)
         driver.set_window_size(1920, 1080)
         
         LOGGER.debug("Loading page: %s", url)
