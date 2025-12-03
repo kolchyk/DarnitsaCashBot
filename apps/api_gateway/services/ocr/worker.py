@@ -311,21 +311,24 @@ async def _notify_api_response(telegram_id: int, receipt_id: UUID, api_response:
     try:
         # Build message with API response data
         message_parts = ["✅ <b>Дані чека отримано з реєстру фіскальних чеків</b>\n\n"]
+        message_parts.append("━━━━━━━━━━━━━━━━━━━━\n\n")
         
-        # Add fiscal number if available
-        fn_value = api_response.get("fn")
-        if fn_value:
-            message_parts.append(f"📋 <b>Фіскальний номер РРО:</b> {fn_value}\n\n")
+        # Add merchant name if available (most important info first)
+        merchant_name = api_response.get("name")
+        if merchant_name:
+            message_parts.append(f"🏪 <b>Торговельна точка:</b> {merchant_name}\n\n")
         
         # Add receipt ID if available
         receipt_api_id = api_response.get("id")
         if receipt_api_id:
             message_parts.append(f"🆔 <b>Номер чека:</b> {receipt_api_id}\n\n")
         
-        # Add merchant name if available
-        merchant_name = api_response.get("name")
-        if merchant_name:
-            message_parts.append(f"🏪 <b>Торговельна точка:</b> {merchant_name}\n\n")
+        # Add fiscal number if available
+        fn_value = api_response.get("fn")
+        if fn_value:
+            message_parts.append(f"📋 <b>Фіскальний номер РРО:</b> {fn_value}\n\n")
+        
+        message_parts.append("━━━━━━━━━━━━━━━━━━━━\n\n")
         
         # Add check data (text receipt) if available
         check_data = api_response.get("check")
@@ -339,7 +342,10 @@ async def _notify_api_response(telegram_id: int, receipt_id: UUID, api_response:
             remaining_space = available_space - current_length
             
             if remaining_space > 100:
+                # Escape HTML special characters in check data for <pre> tag
                 check_preview = check_data[:remaining_space - 50] if len(check_data) > remaining_space - 50 else check_data
+                # Replace HTML entities that might break the message
+                check_preview = check_preview.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
                 message_parts.append(check_preview)
                 if len(check_data) > remaining_space - 50:
                     message_parts.append("\n\n... (текст обрізано через обмеження Telegram)")
@@ -348,21 +354,34 @@ async def _notify_api_response(telegram_id: int, receipt_id: UUID, api_response:
             
             message_parts.append("</pre>\n\n")
         
+        # Add additional info section
+        has_additional_info = False
+        info_parts = []
+        
         # Add XML availability info
         xml_value = api_response.get("xml")
         if xml_value:
             if isinstance(xml_value, bool) and xml_value:
-                message_parts.append("✅ XML дані доступні\n\n")
+                info_parts.append("✅ XML дані доступні")
+                has_additional_info = True
             elif isinstance(xml_value, str) and xml_value:
-                message_parts.append("✅ XML дані доступні\n\n")
+                info_parts.append("✅ XML дані доступні")
+                has_additional_info = True
         
         # Add signature info
         sign_value = api_response.get("sign")
         if sign_value:
             if isinstance(sign_value, bool) and sign_value:
-                message_parts.append("✅ Чек підписано КЕП\n\n")
+                info_parts.append("✅ Чек підписано КЕП")
+                has_additional_info = True
             elif isinstance(sign_value, str) and sign_value:
-                message_parts.append("✅ Чек підписано КЕП\n\n")
+                info_parts.append("✅ Чек підписано КЕП")
+                has_additional_info = True
+        
+        if has_additional_info:
+            message_parts.append("📌 <b>Додаткова інформація:</b>\n")
+            message_parts.append("\n".join(info_parts))
+            message_parts.append("\n\n")
         
         message = "".join(message_parts)
         
