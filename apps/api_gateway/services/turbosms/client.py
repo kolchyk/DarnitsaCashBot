@@ -78,7 +78,7 @@ class TurboSmsClient:
         """
         # Перевіряємо, чи увімкнено TurboSMS
         if not self.settings.turbosms_enabled:
-            logger.debug("TurboSMS is disabled, skipping SMS send")
+            logger.info("TurboSMS is disabled (turbosms_enabled=False), skipping SMS send")
             return False
         
         # Перевіряємо наявність токену
@@ -88,6 +88,7 @@ class TurboSmsClient:
         
         # Нормалізуємо номер телефону
         normalized_phone = normalize_phone_number(phone_number)
+        logger.info(f"Attempting to send SMS to {normalized_phone} via TurboSMS")
         
         # Використовуємо відправника з конфігу або переданого параметра
         sms_sender = sender or self.settings.turbosms_sender
@@ -114,7 +115,7 @@ class TurboSmsClient:
             }
             
             # Відправляємо запит до TurboSMS API
-            logger.debug(f"Sending SMS request: {payload}")
+            logger.debug(f"Sending SMS request to TurboSMS API: recipients={phone_with_prefix}, sender={sms_sender}, message_length={len(message)}")
             response = await self._client.post(
                 f"{self.base_url}/message/send.json",
                 headers=headers,
@@ -123,7 +124,7 @@ class TurboSmsClient:
             response.raise_for_status()
             
             result = response.json()
-            logger.debug(f"TurboSMS API response: {result}")
+            logger.info(f"TurboSMS API response: {result}")
             
             # Перевіряємо результат відповіді
             response_code = result.get("response_code", "")

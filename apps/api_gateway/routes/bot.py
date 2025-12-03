@@ -225,16 +225,30 @@ async def upsert_user(
                     """Функція для надсилання привітального SMS."""
                     turbosms_client = None
                     try:
+                        logger.info(
+                            f"Starting welcome SMS background task for user {payload.telegram_id}, "
+                            f"phone={user.phone_number}"
+                        )
                         turbosms_client = TurboSmsClient(settings)
                         message = (
                             "Вітаємо в Дарниця CashBot!\n"
                             "Надсилайте чеки з продукцією Дарниця та отримуйте бонуси. "
                             "Просто відправте фото чека в Telegram боті!"
                         )
-                        await turbosms_client.send_sms(
+                        success = await turbosms_client.send_sms(
                             phone_number=user.phone_number,
                             message=message,
                         )
+                        if success:
+                            logger.info(
+                                f"Successfully sent welcome SMS to user {payload.telegram_id} "
+                                f"(phone={user.phone_number})"
+                            )
+                        else:
+                            logger.warning(
+                                f"Failed to send welcome SMS to user {payload.telegram_id} "
+                                f"(phone={user.phone_number}): send_sms returned False"
+                            )
                     except Exception as e:
                         logger.error(
                             f"Failed to send welcome SMS to user {payload.telegram_id}: {e}",
@@ -245,6 +259,11 @@ async def upsert_user(
                             await turbosms_client.close()
                 
                 background_tasks.add_task(send_welcome_sms)
+            else:
+                logger.warning(
+                    f"TurboSMS is disabled (TURBOSMS_ENABLED=False), "
+                    f"skipping welcome SMS for user {payload.telegram_id}"
+                )
         
         return UserResponse(
             id=user.id,
