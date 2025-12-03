@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -109,41 +110,109 @@ async def fetch_receipt_data(
     if fn:
         payload["fn"] = fn
     
+    # Create payload copy for logging (without sensitive token)
+    payload_for_logging = {**payload}
+    if "token" in payload_for_logging:
+        payload_for_logging["token"] = f"{token[:8]}..." if len(token) > 8 else "***"
+    
     LOGGER.info(
-        "Requesting receipt data from tax.gov.ua API: id=%s, date=%s, fn=%s, type=%d",
+        "Requesting receipt data from tax.gov.ua API:\n"
+        "  Request URL: %s\n"
+        "  Method: POST\n"
+        "  Payload: id=%s, date=%s, fn=%s, type=%d, token=%s",
+        api_url,
         receipt_id,
         date,
         fn,
         receipt_type,
+        payload_for_logging.get("token", "***"),
     )
     
+    start_time = time.time()
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(api_url, json=payload)
+            elapsed_time = time.time() - start_time
+            
+            # Log response details before raising for status
+            LOGGER.info(
+                "Tax.gov.ua API response received:\n"
+                "  Request URL: %s\n"
+                "  Status Code: %d\n"
+                "  Response Time: %.3f seconds\n"
+                "  Response Size: %d bytes",
+                api_url,
+                response.status_code,
+                elapsed_time,
+                len(response.content),
+            )
+            
             response.raise_for_status()
             
             data = response.json()
             LOGGER.info(
-                "Successfully received receipt data from tax.gov.ua API: id=%s, fn=%s, xml=%s, sign=%s",
+                "Successfully received receipt data from tax.gov.ua API:\n"
+                "  Request URL: %s\n"
+                "  Receipt ID: %s\n"
+                "  Fiscal Number (fn): %s\n"
+                "  XML Available: %s\n"
+                "  Signed: %s\n"
+                "  Check Data Length: %d characters\n"
+                "  Response Time: %.3f seconds",
+                api_url,
                 receipt_id,
                 data.get("fn"),
                 data.get("xml"),
                 data.get("sign"),
+                len(data.get("check", "")),
+                elapsed_time,
             )
             
             return data
     except httpx.HTTPStatusError as e:
+        elapsed_time = time.time() - start_time
         error_msg = f"Tax.gov.ua API returned error status {e.response.status_code}"
         if e.response.text:
             error_msg += f": {e.response.text}"
-        LOGGER.error("Tax.gov.ua API error: %s", error_msg)
+        LOGGER.error(
+            "Tax.gov.ua API error:\n"
+            "  Request URL: %s\n"
+            "  Status Code: %d\n"
+            "  Response Time: %.3f seconds\n"
+            "  Error: %s\n"
+            "  Response Body: %s",
+            api_url,
+            e.response.status_code,
+            elapsed_time,
+            error_msg,
+            e.response.text[:500] if e.response.text else "No response body",
+        )
         raise TaxApiError(error_msg) from e
     except httpx.RequestError as e:
+        elapsed_time = time.time() - start_time
         error_msg = f"Request error while calling tax.gov.ua API: {e}"
-        LOGGER.error("Tax.gov.ua API request error: %s", error_msg)
+        LOGGER.error(
+            "Tax.gov.ua API request error:\n"
+            "  Request URL: %s\n"
+            "  Response Time: %.3f seconds\n"
+            "  Error: %s",
+            api_url,
+            elapsed_time,
+            error_msg,
+        )
         raise TaxApiError(error_msg) from e
     except Exception as e:
+        elapsed_time = time.time() - start_time
         error_msg = f"Unexpected error while calling tax.gov.ua API: {e}"
-        LOGGER.error("Tax.gov.ua API unexpected error: %s", error_msg, exc_info=True)
+        LOGGER.error(
+            "Tax.gov.ua API unexpected error:\n"
+            "  Request URL: %s\n"
+            "  Response Time: %.3f seconds\n"
+            "  Error: %s",
+            api_url,
+            elapsed_time,
+            error_msg,
+            exc_info=True,
+        )
         raise TaxApiError(error_msg) from e
 
