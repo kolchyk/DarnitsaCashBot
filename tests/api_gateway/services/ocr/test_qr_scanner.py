@@ -1,12 +1,9 @@
+from __future__ import annotations
+
 from io import BytesIO
-from pathlib import Path
-import sys
 
 import pytest
 from PIL import Image
-
-PROJECT_ROOT = Path(__file__).resolve().parents[4]
-sys.path.append(str(PROJECT_ROOT))
 
 from apps.api_gateway.services.ocr import qr_scanner
 from apps.api_gateway.services.ocr.qr_scanner import QRCodeNotFoundError, detect_qr_code
@@ -51,3 +48,4 @@ def test_detect_qr_code_raises_if_decoder_missing(monkeypatch):
 
     with pytest.raises(QRCodeNotFoundError):
         detect_qr_code(_blank_image_bytes())
+
